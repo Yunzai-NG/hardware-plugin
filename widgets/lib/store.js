@@ -351,19 +351,26 @@ export function gaugeCard(api, body) {
  *
  * 真正的两列清单是运行时表用的 `table.pairs`（`th` 取自身宽度且不折行，`td` 长内容
  * 处断行）。故此处照它的形态给 —— 一张 table，而不是 dl。
+ *
+ * **表外面包一层 div。** 面板样式表那条 `.board .card.fill > :not(h2, .sub:last-child)`
+ * 会给卡片的直接子元素写 `display: flex`，表格被改写后 thead / tbody 各自块化成 flex 项、
+ * 再各包一张匿名表，列宽从此各算各的（理由详见 `hardware-processes.js`）。包一层之后
+ * 那条规则落在 div 上，表格保持表格布局，`width: 100%` 也才真的作用在表上。
  * @param {object} api 注入的面板能力
  * @param {Array<[string, string]>} rows 每行的名与值
  * @returns {object} vnode
  */
 export function kv(api, rows) {
-  return api.h("table", { class: "pairs" }, [
-    api.h(
-      "tbody",
-      null,
-      rows.map(([name, value]) =>
-        api.h("tr", null, [api.h("th", null, name), api.h("td", { class: "mono" }, value)])
+  return api.h("div", null, [
+    api.h("table", { class: "pairs" }, [
+      api.h(
+        "tbody",
+        null,
+        rows.map(([name, value]) =>
+          api.h("tr", null, [api.h("th", null, name), api.h("td", { class: "mono" }, value)])
+        )
       )
-    )
+    ])
   ])
 }
 

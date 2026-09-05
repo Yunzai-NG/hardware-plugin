@@ -91,12 +91,23 @@ export default {
         ])
       )
 
+      /*
+       * 表外面包一层 div：表格不能做卡片的直接子元素
+       *
+       * 面板样式表那条 `.board .card.fill > :not(h2, .sub:last-child)` 会给直接子元素
+       * 写 `display: flex` —— 表格被改写成 flex 容器后，thead 与 tbody 各自块化成一枚
+       * flex 项，浏览器再把两者的行各包进一张匿名表：两张匿名表各自算列宽，表头按
+       * 内容收成窄条、表体被长进程名撑宽，两者从此对不齐。与本包 style.css 里
+       * `.sys-body` 记的是同一个坑，照那样多包一层躲开。
+       */
       return card(
         api,
         "进程监控",
-        api.h("table", { class: "table" }, [
-          api.h("thead", {}, [head]),
-          api.h("tbody", {}, rows)
+        api.h("div", null, [
+          api.h("table", { class: "table" }, [
+            api.h("thead", {}, [head]),
+            api.h("tbody", {}, rows)
+          ])
         ]),
         note.value
       )

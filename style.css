@@ -159,8 +159,12 @@
  * `kv()` 给出的是一张 `<table>`，而表格的默认宽度按内容算 —— 长型号（「AMD Ryzen 7
  * 6800H with Radeon Graphics」）会把这一栏顶宽，把环那一栏挤扁。给死 `width: 100%`
  * 之后表格服从栅格给的列宽，长值在 `td` 内断行（面板的 `.pairs` 已备好那一手）。
+ *
+ * **用后代选择器而非子选择器**：`kv()` 为躲面板那条把卡片直接子元素改写成
+ * `display: flex` 的规则（见 `widgets/lib/store.js`），在表外包了一层 div，故表
+ * 不再是栅格的直接子元素。
  */
-.sys-grid > .pairs {
+.sys-grid .pairs {
   width: 100%;
 }
 
