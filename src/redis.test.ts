@@ -9,7 +9,7 @@
  * 它的取舍（按声明长度收全再解析）由 `temp/check-batch18.mjs` 在真机上核对。
  */
 import { describe, expect, it } from "vitest"
-import { countKeys, hitRateOf, parseInfo, toRedisInfo } from "./redis.js"
+import { countDatabases, countKeys, hitRateOf, parseInfo, toRedisInfo } from "./redis.js"
 
 /** 一段真实回文的节选，含注释行、空行与各类字段 */
 const SAMPLE = [
@@ -80,6 +80,20 @@ describe("countKeys", () => {
   })
 })
 
+describe("countDatabases", () => {
+  it("数在用的库，不数键", () => {
+    expect(countDatabases(parseInfo(SAMPLE))).toBe(2)
+  })
+
+  it("**键数为 0 的库不算在用**，否则 databases 与 keys 会同时说着相反的话", () => {
+    expect(countDatabases(parseInfo("db0:keys=0,expires=0,avg_ttl=0"))).toBe(0)
+  })
+
+  it("一个 db 都没有时为 0", () => {
+    expect(countDatabases(parseInfo("redis_version:7.2.4"))).toBe(0)
+  })
+})
+
 describe("hitRateOf", () => {
   it("命中 900、未命中 100 得 0.9", () => {
     expect(hitRateOf(parseInfo(SAMPLE))).toBeCloseTo(0.9, 10)
@@ -107,6 +121,7 @@ describe("toRedisInfo", () => {
       clients: 3,
       memoryUsed: 1048576,
       keys: 17,
+      databases: 2,
       hitRate: 0.9,
       uptime: 86_400_000,
       ops: 42

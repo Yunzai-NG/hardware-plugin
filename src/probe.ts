@@ -222,10 +222,34 @@ export function looksNvidia(name: string): boolean {
 }
 
 /**
+ * 两个显卡名是否指同一块卡
+ *
+ * nvidia-smi 报 `NVIDIA GeForce RTX 4090`，而 `si.graphics()` 可能报同一串、也可能只报
+ * `RTX 4090`，故做包含式比较而非精确相等 —— 精确比较会让两路永远配不上，表现为同一块卡
+ * 在列表里出现两次。
+ * @param a 名字一
+ * @param b 名字二
+ * @returns 是否认为是同一块
+ */
+export function namesMatch(a: string, b: string): boolean {
+  const x = a.toLowerCase().trim()
+  const y = b.toLowerCase().trim()
+  if (x === "" || y === "") return false
+  return x.includes(y) || y.includes(x)
+}
+
+/**
  * 合并两路显卡信息
  *
- * nvidia-smi 那一路带占用率，全部保留并排在前；型号表那一路只有型号，排掉虚拟显示器，
- * 且在 nvidia-smi 有结果时排掉其中的 N 卡以免同卡两现。见文件头第 4 条。
+ * nvidia-smi 那一路带占用率，全部保留并排在前；型号表那一路只有型号与标称显存。
+ * 见文件头第 4 条。
+ *
+ * **两路先按名字配对**（`namesMatch`），配上的把型号表里的标称显存补给测到的那条 ——
+ * nvidia-smi 在虚拟化环境里常把显存报成 `[N/A]`，而 `si.graphics()` 的 `vram` 还在。
+ * 此前只按 `looksNvidia` 整条丢弃，那个数便跟着丢了。
+ *
+ * 配不上的型号条目仍照旧处置：排掉虚拟显示器，且 nvidia-smi 有结果时排掉其中的 N 卡 ——
+ * 那是名字比对失败时的兜底，少了它同一块卡会两现。
  * @param models `si.graphics()` 给出的型号表；尚未探到时为 undefined
  * @param measured nvidia-smi 量到的显卡；测不到时为 undefined
  * @returns 合并后的显卡列表；两路都空时为空数组
@@ -234,9 +258,21 @@ export function mergeGpus(
   models: readonly GpuModel[] | undefined,
   measured: readonly GpuCard[] | undefined
 ): GpuCard[] {
-  const merged: GpuCard[] = measured === undefined ? [] : [...measured]
+  /** 已被某条测量结果认领的型号条目，不再单独列出 */
+  const claimed = new Set<GpuModel>()
+
+  const merged: GpuCard[] = (measured ?? []).map(card => {
+    const model = (models ?? []).find(item => !claimed.has(item) && namesMatch(item.name, card.name))
+    if (model !== undefined) claimed.add(model)
+    // 测到的那条为准，只补它缺的标称显存 —— 占用率与显存已用只有 nvidia-smi 给得出
+    return card.memoryTotal !== undefined || model?.memoryTotal === undefined
+      ? card
+      : { ...card, memoryTotal: model.memoryTotal }
+  })
+
   const hasNvidia = merged.length > 0
   for (const model of models ?? []) {
+    if (claimed.has(model)) continue
     if (looksFakeGpu(model.name)) continue
     if (hasNvidia && looksNvidia(model.name)) continue
     merged.push({

@@ -45,6 +45,7 @@ const {
   looksFakeGpu,
   looksNvidia,
   mergeGpus,
+  namesMatch,
   sampleMemory,
   swapOf
 } = await import("./probe.js")
@@ -147,9 +148,61 @@ describe("looksNvidia", () => {
   })
 })
 
+describe("namesMatch", () => {
+  it("一方是另一方的子串即算同一块 —— 两路对同一块卡的写法长短不同", () => {
+    expect(namesMatch("NVIDIA GeForce RTX 4090", "RTX 4090")).toBe(true)
+    expect(namesMatch("rtx 4090", "NVIDIA GeForce RTX 4090")).toBe(true)
+  })
+
+  it("空名字一律不配对，否则它会配上所有卡", () => {
+    expect(namesMatch("", "RTX 4090")).toBe(false)
+    expect(namesMatch("RTX 4090", "  ")).toBe(false)
+  })
+
+  it("不同型号不配对", () => {
+    expect(namesMatch("RTX 4090", "RTX 4060")).toBe(false)
+  })
+})
+
 describe("mergeGpus", () => {
   it("两路都空时给空数组", () => {
     expect(mergeGpus(undefined, undefined)).toEqual([])
+  })
+
+  it("**nvidia-smi 没报显存时，用型号表里的标称值补上** —— 虚拟化环境里它报 [N/A]", () => {
+    const merged = mergeGpus(
+      [{ name: "NVIDIA GeForce RTX 4090", memoryTotal: 24 * 1024 ** 3 }],
+      [{ name: "RTX 4090", load: 0.42 }]
+    )
+    expect(merged).toEqual([{ name: "RTX 4090", load: 0.42, memoryTotal: 24 * 1024 ** 3 }])
+  })
+
+  it("nvidia-smi 已报显存时不被型号表覆盖 —— 前者是实测值", () => {
+    const merged = mergeGpus(
+      [{ name: "RTX 4090", memoryTotal: 24 * 1024 ** 3 }],
+      [{ name: "RTX 4090", load: 0.42, memoryTotal: 23 * 1024 ** 3 }]
+    )
+    expect(merged[0]?.memoryTotal).toBe(23 * 1024 ** 3)
+  })
+
+  it("配对过的型号条目不再单独列出", () => {
+    const merged = mergeGpus([{ name: "RTX 4090" }], [{ name: "NVIDIA GeForce RTX 4090", load: 0.1 }])
+    expect(merged).toHaveLength(1)
+  })
+
+  it("两块同型号的卡各配一条型号条目，不都认领同一条", () => {
+    const merged = mergeGpus(
+      [
+        { name: "RTX 4090", memoryTotal: 24 * 1024 ** 3 },
+        { name: "RTX 4090", memoryTotal: 24 * 1024 ** 3 }
+      ],
+      [
+        { name: "RTX 4090", load: 0.1 },
+        { name: "RTX 4090", load: 0.2 }
+      ]
+    )
+    expect(merged).toHaveLength(2)
+    expect(merged.every(item => item.memoryTotal === 24 * 1024 ** 3)).toBe(true)
   })
 
   it("只有型号表时保留型号，不编造占用率", () => {

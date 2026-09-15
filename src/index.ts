@@ -32,6 +32,7 @@ export {
   looksFakeGpu,
   looksNvidia,
   mergeGpus,
+  namesMatch,
   sampleMemory,
   swapOf
 } from "./probe.js"
@@ -55,6 +56,7 @@ export type { LocalAddress, SysInfo } from "./sysinfo.js"
 export {
   DEFAULT_HOST,
   DEFAULT_PORT,
+  countDatabases,
   countKeys,
   fetchInfo,
   hitRateOf,

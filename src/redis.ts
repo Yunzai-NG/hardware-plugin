@@ -47,6 +47,14 @@ export interface RedisInfo {
   readonly memoryMax?: number
   /** 键总数（全部 db 之和） */
   readonly keys?: number
+  /**
+   * 装着键的库数
+   *
+   * 与 `keys` 分开给：一台「16 个库、键都在 db0」的实例与一台「键摊在 5 个库里」的实例，
+   * 键总数可能一样，而后者上一句 `FLUSHDB` 只清掉五分之一 —— 面板上区分得出这件事。
+   * 空库不计入，故它答的是「有几个库在用」而非 `databases` 配置项。
+   */
+  readonly databases?: number
   /** 命中率（0-1）；累计命中与未命中都为 0 时不出现 */
   readonly hitRate?: number
   /** 运行时长（毫秒） */
@@ -104,6 +112,24 @@ export function countKeys(info: Map<string, string>): number {
 }
 
 /**
+ * 数出有几个库装着键
+ *
+ * 只数 `keys=` 大于 0 的那些：`INFO` 压根不给空库的行，而给了行却写 `keys=0` 的实例
+ * （某些代理层）会让「有几个库在用」多算。
+ * @param info 键值表
+ * @returns 非空库的数目
+ */
+export function countDatabases(info: Map<string, string>): number {
+  let count = 0
+  for (const [key, value] of info) {
+    if (!/^db\d+$/.test(key)) continue
+    const found = /keys=(\d+)/.exec(value)
+    if (found !== null && Number(found[1]) > 0) count += 1
+  }
+  return count
+}
+
+/**
  * 算命中率
  *
  * 两者皆为 0 时返回 undefined 而非 0：那意味着这台 Redis 还没被读过，
@@ -131,6 +157,7 @@ export function toRedisInfo(info: Map<string, string>): RedisInfo {
   const clients = num(info, "connected_clients")
   const used = num(info, "used_memory")
   const ops = num(info, "instantaneous_ops_per_sec")
+  const databases = countDatabases(info)
 
   return {
     connected: true,
@@ -140,6 +167,9 @@ export function toRedisInfo(info: Map<string, string>): RedisInfo {
     // maxmemory 为 0 意为「不限」，此时不给这个字段 —— 画一条分母为 0 的槽毫无意义
     ...(maxMemory === undefined || maxMemory <= 0 ? {} : { memoryMax: maxMemory }),
     keys: countKeys(info),
+    // 0 个在用的库不给这个字段：一台刚起来、还没写过任何键的实例上「0 个库」说不清
+    // 是「没在用」还是「探不到」，而前者由 keys 那一项已经答了
+    ...(databases <= 0 ? {} : { databases }),
     ...(hitRate === undefined ? {} : { hitRate }),
     ...(uptimeSec === undefined ? {} : { uptime: Math.round(uptimeSec * 1000) }),
     ...(ops === undefined ? {} : { ops })

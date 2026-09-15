@@ -79,7 +79,12 @@ export default {
             : `${api.fmt.bytes(info.memoryUsed)} / ${api.fmt.bytes(info.memoryMax)} · ${api.fmt.percent(ratio)}`
         ])
       }
-      if (info.keys !== undefined) rows.push(["键数", String(info.keys)])
+      if (info.keys !== undefined) {
+        // 库数与键数写在同一行：它答的是「键摊在几个库里」，单列一行会让这张表
+        // 为一个次要事实多占 40px，而这一格的高度是按行数量出来的
+        const dbs = info.databases === undefined ? "" : ` · ${info.databases} 个库`
+        rows.push(["键数", `${info.keys}${dbs}`])
+      }
       // 缺失与 0 是两件事，故缺时整行不出现（见文件头）
       if (info.hitRate !== undefined) rows.push(["命中率", api.fmt.percent(info.hitRate)])
       if (info.ops !== undefined) rows.push(["命令/秒", String(info.ops)])
