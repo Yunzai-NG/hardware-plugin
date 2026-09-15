@@ -2,22 +2,20 @@
  * 模块职责：面板插件包的 node 侧入口 —— 注册整机硬件占用的查询端点
  * 依赖方向：只依赖本目录的 probe；**不再 import `@yunzai-ng/core` 的 definePlugin**
  * 生命周期：`setup` 由 webui 在其 setup 期间调用一次；采样器随之建立，无需清理
- * 注意事项：**本插件是「面板插件包」，不是内核插件。** 它装在面板插件目录下，由 webui 扫到、
- *          `import()` 它的 node 侧入口并调 `setup(ctx)`。故这里没有 `definePlugin`，拿到的是一份
- *          受限上下文，只有 `name` / `dir` / `dataDir` / `logger` / `route` / `config` 六项。
+ * 注意事项：本插件是「面板插件包」而非内核插件：webui 扫到它、`import()` 其 node 侧入口并调
+ *          `setup(ctx)`，故没有 `definePlugin`，拿到的是只有 `name` / `dir` / `dataDir` / `logger` /
+ *          `route` / `config` 六项的受限上下文。
  *
- *          **配置声明写在 package.json 的 `webuiPanel.config` 里，不在这里** —— webui 读它、渲染表单、
- *          存值、填默认值，本包只管取用（`ctx.config()`）。取值处一律带兜底。
+ *          配置声明写在 package.json 的 `webuiPanel.config` 里：webui 读它、渲染表单、存值、填默认值，
+ *          本包只管取用（`ctx.config()`），取值处一律带兜底。
  *
- *          **路由路径相对本包**，完整地址由 webui 拼好并经清单交给浏览器侧，故 js 那半用
- *          `api.own("hardware")` 而不自拼前缀 —— 两处各拼一遍就会漂移，表现为接口一齐 404。
+ *          路由路径相对本包，完整地址由 webui 拼好经清单交给浏览器侧，故 js 那半用 `api.own("hardware")`
+ *          而不自拼前缀 —— 两处各拼一遍会漂移，表现为接口一齐 404。
  *
- *          端点**照常鉴权**：整机负载是这台机器的运行状况，没有理由让未登录的人看见。与此相对，
- *          浏览器侧那些 js 是静态资源、不鉴权（浏览器为 `import()` 设不了请求头），故**那些文件里
- *          不可写入任何令牌或密钥**。
+ *          端点照常鉴权：整机负载是这台机器的运行状况。反过来，浏览器侧那些 js 是不鉴权的静态资源
+ *          （`import()` 设不了请求头），故**那些文件里不可写入任何令牌或密钥**。
  *
- *          **`setup` 不抛错。** webui 逐个 try 每个包，抛错会让这个包整体失效；而「端点没注册上」
- *          与「这个包坏了」对使用者是两件事，前者只该少几个格子。
+ *          `setup` 不抛错：webui 逐个 try 每个包，抛错会让整个包失效，而「端点没注册上」只该少几个格子。
  */
 import { DiskSampler } from "./disks.js"
 import { NetSampler } from "./net.js"
