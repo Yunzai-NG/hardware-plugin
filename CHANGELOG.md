@@ -2,7 +2,10 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
-## 未发布
+## 0.3.0 — 2026-09-14
+
+仍要求内核 0.1.0 及以上，与 0.2.0 相同 —— 本版新增的数据一概取自本包自己的依赖
+（`systeminformation`）与既有的 `probeGpus`，没有用到任何新的内核能力。
 
 ### 新增
 
