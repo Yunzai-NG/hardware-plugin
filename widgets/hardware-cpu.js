@@ -45,14 +45,32 @@ export default {
     const note = api.computed(() => {
       if (error.value !== "") return `更新失败：${error.value}`
       const own = overview.data.value?.usage?.cpu
-      const head = own === undefined ? "整机占用" : `整机占用，其中本进程 ${api.fmt.percent(own)}`
-      const models = data.value?.models
-      if (models?.cpu === undefined) return head
-      const cores =
-        models.physicalCores === undefined
-          ? `${models.cores ?? "?"} 线程`
-          : `${models.physicalCores} 核 ${models.cores} 线程`
-      return `${head} · ${models.cpu} · ${cores}`
+      const parts = [own === undefined ? "整机占用" : `整机占用，其中本进程 ${api.fmt.percent(own)}`]
+
+      const info = data.value
+      const models = info?.models
+      if (models?.cpu !== undefined) {
+        parts.push(models.cpu)
+        parts.push(
+          models.physicalCores === undefined
+            ? `${models.cores ?? "?"} 线程`
+            : `${models.physicalCores} 核 ${models.cores} 线程`
+        )
+      }
+
+      /*
+       * 温度与实时频率各自缺则不写，不留「—— ℃」这样的空位
+       *
+       * 台式机、虚拟机与多数容器读不到温度传感器，那是常态而非故障；一行小字里
+       * 出现一个空着的字段，看起来像这一格坏了。node 侧在读不到时整项不给（见
+       * `probe.ts` 的 `tempOf`），故此处只需判断「在不在」。
+       */
+      const temp = info?.temperature?.main
+      if (temp !== undefined) parts.push(`${Math.round(temp)} ℃`)
+      const clock = info?.clock
+      if (clock !== undefined) parts.push(`${(clock / 1000).toFixed(1)} GHz`)
+
+      return parts.join(" · ")
     })
 
     return () =>

@@ -177,16 +177,112 @@ export function toRedisInfo(info: Map<string, string>): RedisInfo {
 }
 
 /**
+ * 拼一条 RESP 命令
+ *
+ * 长度按**字节**算而不是按字符（`Buffer.byteLength`）：密码里出现一个中文字符时，
+ * 按字符算会让声明的长度比实际短，对方按声明截断后拿到半个字符 —— 表现是「密码明明
+ * 是对的却说密码错」。
+ * @param args 命令与其参数
+ * @returns RESP 文本
+ */
+export function encodeCommand(...args: readonly string[]): string {
+  const body = args.map(arg => `$${Buffer.byteLength(arg)}\r\n${arg}\r\n`).join("")
+  return `*${args.length}\r\n${body}`
+}
+
+/** 一条 RESP 回复 */
+export interface RedisReply {
+  /** 正文；错误回复时是错误原文（已去掉前导 `-`） */
+  readonly text: string
+  /** 是否为错误回复 */
+  readonly failed: boolean
+  /** 本条之后的下标，下一条回复从此处起 */
+  readonly next: number
+}
+
+/**
+ * 从缓冲里读一条回复；不完整时给 undefined
+ *
+ * **要能读多条**，不是只读一个批量字符串：带密码时一次连接要发 `AUTH` 与 `INFO` 两条命令
+ * （流水线发出，省一个往返），于是回来的是「`+OK`，紧接着一个批量字符串」。原先的实现
+ * 只认 `$`，那份 `+OK` 会被当成「回复不是批量字符串」而报错。
+ *
+ * 批量字符串**连尾部的 `\r\n` 一起等**：不等它的话下一条回复的起点会偏两个字节，
+ * 而偏移之后读到的是 `\r\n+OK` 这种东西 —— 单条回复时看不出问题，流水线时必然错。
+ * @param all 已收到的全部字节
+ * @param from 从哪个下标开始读
+ * @returns 一条回复；字节还不够时 undefined
+ */
+export function readReply(all: Buffer, from = 0): RedisReply | undefined {
+  const head = all.indexOf("\r\n", from)
+  if (head < 0) return undefined
+
+  const line = all.subarray(from, head).toString("latin1")
+  const tag = line.slice(0, 1)
+  const body = line.slice(1)
+  const after = head + 2
+
+  // 简单字符串（`+OK`）与整数（`:12`）在首行里就说完了
+  if (tag === "+" || tag === ":") return { text: body, failed: false, next: after }
+  if (tag === "-") return { text: body, failed: true, next: after }
+  if (tag !== "$") {
+    return { text: `无法识别的 RESP 回复：${line.slice(0, 40)}`, failed: true, next: after }
+  }
+
+  const length = Number(body)
+  if (!Number.isFinite(length)) {
+    return { text: "回复声明的长度不是数字", failed: true, next: after }
+  }
+  // `$-1` 是 nil，不是错误 —— 一条命令正常地什么都没返回
+  if (length < 0) return { text: "", failed: false, next: after }
+  if (all.length < after + length + 2) return undefined
+  return { text: all.subarray(after, after + length).toString("utf8"), failed: false, next: after + length + 2 }
+}
+
+/** 连 Redis 时的身份 */
+export interface RedisAuth {
+  /** 密码；留空即不鉴权 */
+  readonly password?: string
+  /** 用户名，Redis 6 起的 ACL 才有；留空则按 `AUTH <密码>` 的老形式发 */
+  readonly username?: string
+}
+
+/**
+ * 把 Redis 的错误回复翻成一句能照着做的话
+ *
+ * 原文是给程序看的（`NOAUTH Authentication required.`），照搬到面板上等于让使用者
+ * 自己去搜。这几种恰好都是**配置填错**，而错在哪一项这里说得出来。
+ * @param raw 错误回复原文
+ * @returns 人话；认不出时原样返回
+ */
+export function explainRedisError(raw: string): string {
+  const upper = raw.toUpperCase()
+  if (upper.startsWith("NOAUTH")) return "这台 Redis 要密码，请在插件配置里填「密码」一项"
+  if (upper.startsWith("WRONGPASS")) return "密码或用户名不对"
+  // 没设 requirepass 的实例收到 AUTH 时的原话是
+  // `ERR Client sent AUTH, but no password is set. Did you mean AUTH <username> <password>?`
+  if (upper.includes("NO PASSWORD IS SET")) return "这台 Redis 没设密码，请把配置里的「密码」清空"
+  if (upper.startsWith("LOADING")) return "Redis 正在从磁盘载入数据，稍后即可"
+  if (upper.startsWith("BUSY")) return "Redis 正忙于执行一个脚本"
+  if (upper.startsWith("MASTERDOWN")) return "这是一个从库，而它的主库当前不可达"
+  return raw
+}
+
+/**
  * 连一次 Redis 并取回 `INFO` 的原文
  *
- * 手写 RESP 的两个方向：发出去的是一条数组形式的命令，收回来的是一个批量字符串。
- * **按声明的长度收全再解析**，不以「收到了 `\r\n`」为界 —— `INFO` 的正文有几千字节，
- * 必然分成多个 TCP 包到达，而正文里本身就含大量 `\r\n`。
+ * 手写 RESP 的两个方向：发出去的是数组形式的命令，收回来逐条按 {@link readReply} 解析。
+ * 有密码时 `AUTH` 与 `INFO` **一次写出**（流水线），省掉一个往返 —— 本机往返虽只有零点几
+ * 毫秒，但远端 Redis 上两个往返就是两倍延迟，而这个函数被 5 秒一次地调用。
  * @param host 主机
  * @param port 端口
+ * @param auth 身份；不给或密码为空即不鉴权
  * @returns `INFO` 的正文
  */
-export function fetchInfo(host: string, port: number): Promise<string> {
+export function fetchInfo(host: string, port: number, auth: RedisAuth = {}): Promise<string> {
+  const password = auth.password ?? ""
+  const username = auth.username ?? ""
+
   return new Promise((resolve, reject) => {
     const socket = createConnection({ host, port })
     socket.setTimeout(TIMEOUT_MS)
@@ -207,35 +303,44 @@ export function fetchInfo(host: string, port: number): Promise<string> {
     }
 
     socket.on("connect", () => {
-      // RESP：一个含单个批量字符串的数组，即 `INFO`
-      socket.write("*1\r\n$4\r\nINFO\r\n")
+      const auths =
+        password === ""
+          ? ""
+          : username === ""
+            ? encodeCommand("AUTH", password)
+            : encodeCommand("AUTH", username, password)
+      socket.write(`${auths}${encodeCommand("INFO")}`)
     })
 
     socket.on("data", buf => {
       chunks.push(buf)
       const all = Buffer.concat(chunks)
-      const head = all.indexOf("\r\n")
-      if (head < 0) return
 
-      const prefix = all.subarray(0, head).toString("latin1")
-      // `-ERR ...` 是错误回复；此处唯一可能的成因是对方要 AUTH
-      if (prefix.startsWith("-")) {
-        done(new Error(prefix.slice(1)))
-        return
-      }
-      if (!prefix.startsWith("$")) {
-        done(new Error(`回复不是批量字符串：${prefix.slice(0, 40)}`))
-        return
+      /*
+       * 逐条读，`AUTH` 那条的回复先落地
+       *
+       * 两条回复未必在同一个 TCP 包里到达，故每次 `data` 都从头重读一遍 —— 状态只有
+       * 「收到的字节」这一份，不必另记「读到第几条了」。`INFO` 的正文只有几千字节，
+       * 重读的代价可忽略。
+       */
+      let at = 0
+      if (password !== "") {
+        const ok = readReply(all, at)
+        if (ok === undefined) return
+        if (ok.failed) {
+          done(new Error(explainRedisError(ok.text)))
+          return
+        }
+        at = ok.next
       }
 
-      const length = Number(prefix.slice(1))
-      if (!Number.isFinite(length) || length < 0) {
-        done(new Error("回复声明的长度不是正整数"))
+      const info = readReply(all, at)
+      if (info === undefined) return
+      if (info.failed) {
+        done(new Error(explainRedisError(info.text)))
         return
       }
-      // 按声明的长度收全，理由见函数注释
-      if (all.length < head + 2 + length) return
-      done(undefined, all.subarray(head + 2, head + 2 + length).toString("utf8"))
+      done(undefined, info.text)
     })
 
     socket.on("timeout", () => done(new Error("ETIMEDOUT")))
@@ -251,15 +356,21 @@ export function fetchInfo(host: string, port: number): Promise<string> {
  * 多数部署没有 Redis，那是常态而非故障。
  * @param host 主机，缺省 `127.0.0.1`
  * @param port 端口，缺省 6379
+ * @param auth 身份；不给或密码为空即不鉴权
  * @returns Redis 运行状况
  */
-export async function sampleRedis(host = DEFAULT_HOST, port = DEFAULT_PORT): Promise<RedisInfo> {
+export async function sampleRedis(
+  host = DEFAULT_HOST,
+  port = DEFAULT_PORT,
+  auth: RedisAuth = {}
+): Promise<RedisInfo> {
   try {
-    return toRedisInfo(parseInfo(await fetchInfo(host, port)))
+    return toRedisInfo(parseInfo(await fetchInfo(host, port, auth)))
   } catch (err) {
     const code = (err as { code?: string }).code
     return {
       connected: false,
+      // 错误码优先（`ECONNREFUSED` 便于搜索），鉴权那类没有码，用已经翻好的那句
       reason: code ?? (err instanceof Error ? err.message : String(err))
     }
   }

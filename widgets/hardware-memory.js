@@ -63,6 +63,14 @@ export default {
       const parts = [`整机 ${api.fmt.bytes(mem.used)} / ${api.fmt.bytes(mem.total)}`]
       const rss = overview.data.value?.usage?.rss
       if (rss !== undefined) parts.push(`本进程 ${api.fmt.bytes(rss)}`)
+      /*
+       * 可回收的那一段单独说
+       *
+       * Linux 上这个数常有好几个 GB（页面缓存与 slab），而它既不算在「已用」里、
+       * 又确实占着物理内存 —— 不写出来的话，使用者拿 `free -h` 一对，会发现两处
+       * 对不上而无从解释。Windows 上这个数通常很小或为 0，那时同样照实说。
+       */
+      if (mem.cached !== undefined && mem.cached > 0) parts.push(`可回收 ${api.fmt.bytes(mem.cached)}`)
       const models = data.value?.models
       if (models?.memoryType !== undefined) {
         parts.push(

@@ -9,7 +9,16 @@
  * 它的取舍（按声明长度收全再解析）由 `temp/check-batch18.mjs` 在真机上核对。
  */
 import { describe, expect, it } from "vitest"
-import { countDatabases, countKeys, hitRateOf, parseInfo, toRedisInfo } from "./redis.js"
+import {
+  countDatabases,
+  countKeys,
+  encodeCommand,
+  explainRedisError,
+  hitRateOf,
+  parseInfo,
+  readReply,
+  toRedisInfo
+} from "./redis.js"
 
 /** 一段真实回文的节选，含注释行、空行与各类字段 */
 const SAMPLE = [
@@ -144,5 +153,96 @@ describe("toRedisInfo", () => {
 
   it("一份空回文仍给出 connected 与 keys，其余一概不出现", () => {
     expect(toRedisInfo(parseInfo(""))).toEqual({ connected: true, keys: 0 })
+  })
+})
+
+describe("encodeCommand", () => {
+  it("拼成 RESP 数组", () => {
+    expect(encodeCommand("INFO")).toBe("*1\r\n$4\r\nINFO\r\n")
+    expect(encodeCommand("AUTH", "pw")).toBe("*2\r\n$4\r\nAUTH\r\n$2\r\npw\r\n")
+  })
+
+  it("**长度按字节算而不是按字符** —— 否则中文密码会被对方截成半个字符", () => {
+    // 「密」是 3 字节
+    expect(encodeCommand("AUTH", "密")).toBe("*2\r\n$4\r\nAUTH\r\n$3\r\n密\r\n")
+  })
+})
+
+describe("readReply", () => {
+  /**
+   * 造一个缓冲
+   * @param text 原文
+   * @returns 缓冲
+   */
+  const buf = (text: string): Buffer => Buffer.from(text, "utf8")
+
+  it("读简单字符串，并给出下一条的起点", () => {
+    const reply = readReply(buf("+OK\r\n$2\r\nhi\r\n"))
+    expect(reply).toMatchObject({ text: "OK", failed: false })
+    // 从那个起点接着读，拿到的是第二条 —— 流水线时靠这条才不会错位
+    const next = readReply(buf("+OK\r\n$2\r\nhi\r\n"), reply?.next)
+    expect(next?.text).toBe("hi")
+  })
+
+  it("读批量字符串，正文里的 \\r\\n 不当作结束", () => {
+    const body = "a\r\nb"
+    const reply = readReply(buf(`$${body.length}\r\n${body}\r\n`))
+    expect(reply?.text).toBe(body)
+    expect(reply?.failed).toBe(false)
+  })
+
+  it("错误回复标为 failed，正文去掉前导减号", () => {
+    expect(readReply(buf("-NOAUTH Authentication required.\r\n"))).toMatchObject({
+      text: "NOAUTH Authentication required.",
+      failed: true
+    })
+  })
+
+  it("整数回复读得出", () => {
+    expect(readReply(buf(":12\r\n"))).toMatchObject({ text: "12", failed: false })
+  })
+
+  it("**`$-1` 是 nil，不是错误** —— 一条命令正常地什么都没返回", () => {
+    expect(readReply(buf("$-1\r\n"))).toMatchObject({ text: "", failed: false })
+  })
+
+  it("字节还不够时给 undefined，等下一个包", () => {
+    // 声明 10 字节却只到了 2 个
+    expect(readReply(buf("$10\r\nhi"))).toBeUndefined()
+    // 连首行都没收完
+    expect(readReply(buf("$10"))).toBeUndefined()
+  })
+
+  it("**尾部的 \\r\\n 也要等** —— 不等它下一条的起点会偏两个字节", () => {
+    expect(readReply(buf("$2\r\nhi"))).toBeUndefined()
+    expect(readReply(buf("$2\r\nhi\r\n"))?.next).toBe(8)
+  })
+
+  it("认不出的前缀作错误，不静默当成空正文", () => {
+    expect(readReply(buf("?什么\r\n"))?.failed).toBe(true)
+  })
+})
+
+describe("explainRedisError", () => {
+  it("NOAUTH 指向「该填密码」", () => {
+    expect(explainRedisError("NOAUTH Authentication required.")).toContain("要密码")
+  })
+
+  it("WRONGPASS 指向「密码或用户名不对」", () => {
+    expect(explainRedisError("WRONGPASS invalid username-password pair")).toContain("不对")
+  })
+
+  it("**「没设密码却填了密码」单独一句** —— 与密码错是相反的处置", () => {
+    expect(
+      explainRedisError("ERR Client sent AUTH, but no password is set. Did you mean AUTH <username> <password>?")
+    ).toContain("清空")
+  })
+
+  it("LOADING 说明稍后即可，不是配置错", () => {
+    expect(explainRedisError("LOADING Redis is loading the dataset in memory")).toContain("稍后")
+  })
+
+  it("认不出的原样返回，不吞掉信息", () => {
+    expect(explainRedisError("ERR 某个新错误")).toBe("ERR 某个新错误")
   })
 })

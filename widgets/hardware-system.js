@@ -94,18 +94,52 @@ export default {
       }
       rows.push(["CPU 使用率", api.fmt.percent(info?.cpu)])
       if (usage?.cpu !== undefined) rows.push([`${OWN_LABEL} 占用`, api.fmt.percent(usage.cpu)])
+      /*
+       * 频率与温度：探得到才出现
+       *
+       * 温度尤其值得看 —— 一台散热不良的机器，温度比占用率更早说明问题。台式机、
+       * 虚拟机与多数容器里读不到传感器，那时整行不出现（见 node 侧的 `tempOf`）。
+       */
+      if (info?.clock !== undefined) rows.push(["CPU 频率", `${info.clock} MHz`])
+      if (info?.temperature !== undefined) {
+        const max = info.temperature.max === undefined ? "" : ` / 上限 ${info.temperature.max} ℃`
+        rows.push(["CPU 温度", `${Math.round(info.temperature.main)} ℃${max}`])
+      }
 
       if (mem !== undefined) {
         rows.push(["内存总量", api.fmt.bytes(mem.total)])
         rows.push(["内存使用量", `${api.fmt.bytes(mem.used)} / ${api.fmt.bytes(mem.total)}`])
       }
       if (usage?.rss !== undefined) rows.push([`${OWN_LABEL} 内存`, api.fmt.bytes(usage.rss)])
+      /*
+       * 可回收缓存单独一行，只在这个数存在时出现
+       *
+       * 它是「内存使用量看起来很高」的解释：Linux 把页面缓存算在已用之外的可回收部分里，
+       * 而没有这一行时使用者只看到一个偏高的占用，无从知道其中多少是随时能还的。
+       * Windows 上这个数常常是 0，那时照样显示 —— 「有这一项且为 0」本身也是一句回答。
+       */
+      if (mem?.cached !== undefined) rows.push(["可回收缓存", api.fmt.bytes(mem.cached)])
       if (models?.memoryType !== undefined) {
         rows.push([
           "内存规格",
           models.memoryClock === undefined
             ? models.memoryType
             : `${models.memoryType} ${models.memoryClock} MHz`
+        ])
+      }
+
+      /*
+       * 电池只在真有电池时出现
+       *
+       * node 侧按 `hasBattery` 判定（见 probe.ts 的 `batteryOf`），故台式机与服务器上
+       * 这一行整个不出现，而不是显示一枚恒为「0%、未充电」的假电池。
+       */
+      if (info?.battery !== undefined) {
+        const left =
+          info.battery.minutesLeft === undefined ? "" : ` · 剩余约 ${api.fmt.duration(info.battery.minutesLeft * 60_000)}`
+        rows.push([
+          "电池",
+          `${api.fmt.percent(info.battery.level)}${info.battery.charging ? " · 充电中" : left}`
         ])
       }
 

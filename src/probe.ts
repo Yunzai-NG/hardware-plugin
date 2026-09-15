@@ -107,6 +107,13 @@ export interface MemoryInfo {
   readonly used: number
   /** 可用（字节） */
   readonly free: number
+  /**
+   * 缓冲区与页面缓存（字节）；取不到时不出现
+   *
+   * 单列一项是为了解释 `used` 为何常与别的工具对不上：这部分随时可回收，`available`
+   * 已把它算作可用，而 `top` 的「已用」把它算在内。写出来，那个差额就有了名字。
+   */
+  readonly cached?: number
 }
 
 /**
@@ -148,6 +155,14 @@ export interface HardwareModels {
 export interface HardwareInfo {
   /** 整机 CPU 占用（0-1）；首次采样时不出现，见文件头第 2 条 */
   readonly cpu?: number
+  /**
+   * 各逻辑核各自的占用（0-1），顺序同 `os.cpus()`
+   *
+   * 与 `cpu` 同一份采样算出，故不多花任何代价。给它是因为整机那一个数会把
+   * 「一个线程吃满、其余闲着」与「所有核都在半忙」显示成同一个值 —— 前者是某个
+   * 单线程任务卡住了，后者是机器真的在干活，而这两件事的处置完全不同。
+   */
+  readonly cores?: readonly number[]
   /** 整机内存占用 */
   readonly memory: MemoryInfo
   /** 交换空间占用；没有交换空间时不出现（总量为 0）而非给一个 0/0，见 `sampleSwap` */
@@ -156,6 +171,43 @@ export interface HardwareInfo {
   readonly gpus: readonly GpuCard[]
   /** 硬件型号；尚未探完时不出现，见文件头第 1 条 */
   readonly models?: HardwareModels
+  /** CPU 温度；取不到时不出现，见 `tempOf` */
+  readonly temperature?: TempInfo
+  /** CPU 实时频率（MHz）；取不到时不出现 */
+  readonly clock?: number
+  /** 电池；没有电池的机器上不出现，见 `batteryOf` */
+  readonly battery?: BatteryInfo
+}
+
+/**
+ * CPU 温度
+ *
+ * **取不到时整项不出现，不记 0。** 台式机、虚拟机与多数容器里读不到温度传感器，
+ * 而「0 ℃」会被读成「凉得出奇」。`si` 在这些机器上给的是 `null` 或 `-1`，两者都要挡掉。
+ */
+export interface TempInfo {
+  /** 主传感器读数（摄氏度） */
+  readonly main: number
+  /** 各核读数；给不出时不出现 */
+  readonly cores?: readonly number[]
+  /** 厂商标称的临界温度；给不出时不出现 */
+  readonly max?: number
+}
+
+/**
+ * 电池
+ *
+ * **没有电池的机器上整项不出现。** 台式机与服务器占了部署的多数，给一枚恒为
+ * 「0%、未充电」的电池卡片是错的 —— `si.battery()` 在那些机器上照样返回一个对象，
+ * 故判据是它的 `hasBattery` 而非「有没有拿到数据」。
+ */
+export interface BatteryInfo {
+  /** 剩余电量（0-1） */
+  readonly level: number
+  /** 是否正在充电 */
+  readonly charging: boolean
+  /** 剩余可用时间（分钟）；充电中或算不出时不出现 */
+  readonly minutesLeft?: number
 }
 
 /** 出错时的告知方式，由调用方接到 `ctx.logger` 上 */
@@ -195,6 +247,128 @@ export function cpuLoad(prev: CpuTimes | undefined, next: CpuTimes): number | un
   if (!Number.isFinite(span) || span <= 0) return undefined
   const idleSpan = Math.max(next.idle - prev.idle, 0)
   return Math.min(1, Math.max(0, 1 - idleSpan / span))
+}
+
+/**
+ * 逐核汇总时间累计量
+ *
+ * 与 `cpuTimes` 同一算式，只是不相加 —— 整机那个数就是这些的合计，故两者必然自洽。
+ * @param list `os.cpus()` 的返回值
+ * @returns 各核的累计量，顺序同入参
+ */
+export function perCoreTimes(list: readonly { readonly times: CpuTimeBuckets }[]): CpuTimes[] {
+  return list.map(core => cpuTimes([core]))
+}
+
+/**
+ * 由两批采样点算出各核占用
+ *
+ * **核数变了就整批不给。** 热插拔 CPU、容器被改了 cpuset 都会让两批长度不同，此时按
+ * 下标配对得到的是「拿 3 号核的新值减 5 号核的旧值」—— 那种数看起来是真的，却毫无意义。
+ * @param prev 上一批采样点，首次为 undefined
+ * @param next 本批采样点
+ * @returns 各核占用（0-1）；算不出时 undefined
+ */
+export function perCoreLoad(
+  prev: readonly CpuTimes[] | undefined,
+  next: readonly CpuTimes[]
+): number[] | undefined {
+  if (prev === undefined || prev.length !== next.length || next.length === 0) return undefined
+  const out: number[] = []
+  for (const [i, one] of next.entries()) {
+    const load = cpuLoad(prev[i], one)
+    // 某一核算不出就整批不给：一个缺口会让下标与核号错位，而条形图是按下标画的
+    if (load === undefined) return undefined
+    out.push(load)
+  }
+  return out
+}
+
+/**
+ * 把 `si.cpuTemperature()` 的返回值整理成温度项
+ *
+ * **`0` 与 `-1` 都当作「读不到」。** 前者是 `si` 在拿不到传感器时的填充值，后者是它
+ * 在部分平台上的表示；照收的话卡片上会出现「0 ℃」，而那会被读成「凉得出奇」。一个真在
+ * 运转的 CPU 不可能是 0 ℃，故这条判断不会误伤真实读数。
+ * @param raw `si.cpuTemperature()` 的返回值；取不到时为 undefined
+ * @returns 温度；读不到时 undefined
+ */
+export function tempOf(
+  raw:
+    | {
+        readonly main?: number | null
+        readonly cores?: readonly (number | null)[] | null
+        readonly max?: number | null
+      }
+    | undefined
+): TempInfo | undefined {
+  /**
+   * 一个温度读数是否可用
+   * @param value 读数
+   * @returns 是否可用
+   */
+  const usable = (value: unknown): value is number => {
+    const num = Number(value)
+    return Number.isFinite(num) && num > 0
+  }
+
+  const main = Number(raw?.main)
+  if (!usable(main)) return undefined
+
+  const cores = (raw?.cores ?? []).filter(usable)
+  const max = Number(raw?.max)
+  return {
+    main,
+    ...(cores.length > 0 ? { cores } : {}),
+    ...(usable(max) ? { max } : {})
+  }
+}
+
+/**
+ * 把 `si.cpuCurrentSpeed()` 的返回值整理成频率（MHz）
+ *
+ * `si` 给的是 GHz，面板上其余频率（内存那一项）用的是 MHz，故在此换算成同一单位 ——
+ * 一张卡上两个频率各用一套单位，使用者要先看清后缀才能比较。
+ * @param raw `si.cpuCurrentSpeed()` 的返回值；取不到时为 undefined
+ * @returns 频率（MHz）；取不到时 undefined
+ */
+export function clockOf(raw: { readonly avg?: number | null } | undefined): number | undefined {
+  const ghz = Number(raw?.avg)
+  if (!Number.isFinite(ghz) || ghz <= 0) return undefined
+  return Math.round(ghz * 1000)
+}
+
+/**
+ * 把 `si.battery()` 的返回值整理成电池项
+ *
+ * **判据是 `hasBattery`，不是「有没有拿到数据」。** 台式机上这个调用照样成功，只是
+ * `hasBattery: false` 且各项为 0 —— 照收会让服务器上多出一枚恒为「0%、未充电」的卡片。
+ * @param raw `si.battery()` 的返回值；取不到时为 undefined
+ * @returns 电池；没有电池时 undefined
+ */
+export function batteryOf(
+  raw:
+    | {
+        readonly hasBattery?: boolean
+        readonly percent?: number | null
+        readonly isCharging?: boolean
+        readonly timeRemaining?: number | null
+      }
+    | undefined
+): BatteryInfo | undefined {
+  if (raw?.hasBattery !== true) return undefined
+
+  const percent = Number(raw.percent)
+  const minutes = Number(raw.timeRemaining)
+  return {
+    // 电量夹在 0-1：`si` 偶尔给出 101（校准偏差），而一枚超过满圈的环画不出来
+    level: Number.isFinite(percent) ? Math.min(Math.max(percent / 100, 0), 1) : 0,
+    charging: raw.isCharging === true,
+    // 充电中时 `timeRemaining` 是「充满还要多久」而非「还能用多久」，语义不同故不给
+    ...(raw.isCharging !== true && Number.isFinite(minutes) && minutes > 0
+      ? { minutesLeft: Math.round(minutes) }
+      : {})
+  }
 }
 
 /**
@@ -287,13 +461,38 @@ export function mergeGpus(
 
 /**
  * 读一份整机内存占用
+ *
+ * **优先用 `si.mem()` 的 `available`，`freemem()` 只作兜底。** 这是本函数唯一的要点：
+ * Linux 的 `freemem()` 答的是「完全没被碰过的页」，而页面缓存与 slab 不在其中 ——
+ * 那些是随时可回收的。于是一台真正空闲的 Linux 机器会显示 80% 占用，而 `free -h` 的
+ * available 说还有一大半可用。`available` 正是内核自己算出的「不触发换页就能给出多少」，
+ * 与 `free -h` 同源，也与 Windows 上任务管理器的口径一致（那里两者本就接近）。
+ *
+ * 兜底仍是 `totalmem() - freemem()`：`si.mem()` 取不到时（它在少数平台上会失败）
+ * 有个偏高的数仍胜过没有这一格。偏高与缺失比起来，前者仍指得出「内存在涨」这件事。
+ * @param mem `si.mem()` 的返回值；取不到时为 undefined
  * @returns 内存占用
  */
-export function sampleMemory(): MemoryInfo {
-  const total = totalmem()
-  const free = freemem()
+export function sampleMemory(
+  mem?: { readonly total?: number; readonly available?: number; readonly buffcache?: number }
+): MemoryInfo {
+  // 总量以 `si` 那份为准（它与 available 同源），取不到才用 os 的
+  const siTotal = Number(mem?.total)
+  const total = Number.isFinite(siTotal) && siTotal > 0 ? siTotal : totalmem()
+
+  const available = Number(mem?.available)
+  const free = Number.isFinite(available) && available >= 0 ? available : freemem()
   const capped = Math.min(Math.max(free, 0), total)
-  return { total, used: total - capped, free: capped }
+
+  const cached = Number(mem?.buffcache)
+  return {
+    total,
+    used: total - capped,
+    free: capped,
+    // 0 也照给：Windows 上这个数确实可能是 0，而「有这一项且为 0」与「没有这一项」
+    // 在组件里是两种画法（后者整行不出现）
+    ...(Number.isFinite(cached) && cached >= 0 ? { cached } : {})
+  }
 }
 
 /**
@@ -328,6 +527,9 @@ export function swapOf(
 export class HardwareSampler {
   /** 上一个 CPU 采样点 */
   #prev: CpuTimes | undefined
+
+  /** 上一批逐核采样点，与 `#prev` 同一时刻取 */
+  #prevCores: readonly CpuTimes[] | undefined
 
   /** 探到的型号；尚未探完时 undefined */
   #models: HardwareModels | undefined
@@ -430,35 +632,66 @@ export class HardwareSampler {
       void this.probeModels()
     }
 
-    const next = cpuTimes(cpus())
+    // 整机与逐核取自同一次 `os.cpus()`：分两次读会让「各核之和」与整机那个数对不上
+    const cores = cpus()
+    const next = cpuTimes(cores)
+    const nextCores = perCoreTimes(cores)
     const load = cpuLoad(this.#prev, next)
+    const perCore = perCoreLoad(this.#prevCores, nextCores)
     this.#prev = next
+    this.#prevCores = nextCores
 
     /*
-     * 显卡占用与 swap 并发取
+     * 五路 `si` 并发取
      *
-     * 两者互不相关，串行只是把耗时相加。各自带 catch：一台取不到 swap 的机器
-     * （容器里常见）仍该看得见显卡，反之亦然。
+     * 彼此互不相关，串行只是把耗时相加。各自带 catch：一台读不到温度传感器的机器
+     * （虚拟机、多数容器）仍该看得见显卡与内存，反之亦然。
+     *
+     * `si.mem()` 供两处用：交换空间（`node:os` 不给这个数）与物理内存的 `available`
+     * （见 `sampleMemory`）。它失败时后者退回 `freemem()`，前者整个不出现。
+     *
+     * 温度、频率与电池**各自可缺**，这正是它们能进这份快照的前提 —— 三者都是纯读取
+     * （Linux 读 sysfs、Windows 走 WMI），与 `si.processes()` 那种要遍历整张进程表的
+     * 调用不是一个量级，故不必另开端点。
      */
-    const [measured, mem] = await Promise.all([
+    const [measured, mem, temp, speed, battery] = await Promise.all([
       probeGpus().catch((err: unknown) => {
         this.#warn("探测显卡占用失败", err)
         return undefined
       }),
       si.mem().catch((err: unknown) => {
-        this.#warn("探测交换空间失败", err)
+        this.#warn("探测内存与交换空间失败", err)
+        return undefined
+      }),
+      si.cpuTemperature().catch((err: unknown) => {
+        this.#warn("探测 CPU 温度失败", err)
+        return undefined
+      }),
+      si.cpuCurrentSpeed().catch((err: unknown) => {
+        this.#warn("探测 CPU 频率失败", err)
+        return undefined
+      }),
+      si.battery().catch((err: unknown) => {
+        this.#warn("探测电池失败", err)
         return undefined
       })
     ])
 
     const swap = swapOf(mem)
+    const temperature = tempOf(temp)
+    const clock = clockOf(speed)
+    const power = batteryOf(battery)
 
     const value: HardwareInfo = {
       ...(load === undefined ? {} : { cpu: load }),
-      memory: sampleMemory(),
+      ...(perCore === undefined ? {} : { cores: perCore }),
+      memory: sampleMemory(mem),
       ...(swap === undefined ? {} : { swap }),
       gpus: mergeGpus(this.#gpuModels, measured),
-      ...(this.#models === undefined ? {} : { models: this.#models })
+      ...(this.#models === undefined ? {} : { models: this.#models }),
+      ...(temperature === undefined ? {} : { temperature }),
+      ...(clock === undefined ? {} : { clock }),
+      ...(power === undefined ? {} : { battery: power })
     }
     this.#cache = { at: now, value }
     return value

@@ -27,16 +27,22 @@ import { SysInfoSampler } from "./sysinfo.js"
 
 export {
   HardwareSampler,
+  batteryOf,
+  clockOf,
   cpuLoad,
   cpuTimes,
   looksFakeGpu,
   looksNvidia,
   mergeGpus,
   namesMatch,
+  perCoreLoad,
+  perCoreTimes,
   sampleMemory,
-  swapOf
+  swapOf,
+  tempOf
 } from "./probe.js"
 export type {
+  BatteryInfo,
   CpuTimeBuckets,
   CpuTimes,
   GpuCard,
@@ -45,7 +51,8 @@ export type {
   HardwareModels,
   MemoryInfo,
   ProbeWarn,
-  SwapInfo
+  SwapInfo,
+  TempInfo
 } from "./probe.js"
 export { DiskSampler, ioRates, toIoCounters, toPartitions } from "./disks.js"
 export type { DiskInfo, DiskIoCounters, DiskIoRates, DiskPartition } from "./disks.js"
@@ -146,12 +153,16 @@ export interface HardwareContext {
  * 而这里少一项的后果是「连了个 undefined:6379」，那个错在日志里看起来像网络问题。
  */
 export interface HardwareConfig {
-  /** Redis 连接地址 */
+  /** Redis 连接地址与鉴权 */
   readonly redis?: {
     /** 主机 */
     readonly host?: string
     /** 端口 */
     readonly port?: number
+    /** 密码；留空即不鉴权 */
+    readonly password?: string
+    /** 用户名，Redis 6 起的 ACL 才有；留空按 `AUTH <密码>` 的老形式发 */
+    readonly username?: string
   }
   /** 对外探测目标：名字 → 地址 */
   readonly probes?: Record<string, string>
@@ -216,7 +227,18 @@ export default {
     ctx.route(REDIS_PATH, () => {
       const redis = ctx.config<HardwareConfig>().redis
       const host = (redis?.host ?? "").trim()
-      return sampleRedis(host === "" ? DEFAULT_HOST : host, redis?.port ?? DEFAULT_PORT)
+      const password = (redis?.password ?? "").trim()
+      const username = (redis?.username ?? "").trim()
+      /*
+       * 密码与用户名留空即整项不传，而不是传一个空串
+       *
+       * 空串会让 `fetchInfo` 走 AUTH 那一路、发出 `AUTH ""` —— 一台没设密码的 Redis
+       * 会以 `ERR Client sent AUTH, but no password is set` 拒掉，而那台机器本来是连得上的。
+       */
+      return sampleRedis(host === "" ? DEFAULT_HOST : host, redis?.port ?? DEFAULT_PORT, {
+        ...(password === "" ? {} : { password }),
+        ...(username === "" ? {} : { username })
+      })
     })
     ctx.route(NET_PATH, () => net.sample(warn, toProbeTargets(ctx.config<HardwareConfig>().probes)))
 

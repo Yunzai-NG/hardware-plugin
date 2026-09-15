@@ -22,6 +22,9 @@ const siCpu = vi.fn<() => Promise<unknown>>()
 const siMemLayout = vi.fn<() => Promise<unknown>>()
 const siGraphics = vi.fn<() => Promise<unknown>>()
 const siMem = vi.fn<() => Promise<unknown>>()
+const siTemp = vi.fn<() => Promise<unknown>>()
+const siSpeed = vi.fn<() => Promise<unknown>>()
+const siBattery = vi.fn<() => Promise<unknown>>()
 const osCpus = vi.fn<() => { times: { user: number; nice: number; sys: number; idle: number; irq: number } }[]>()
 
 vi.mock("@yunzai-ng/core", () => ({ probeGpus: (): Promise<unknown> => probeGpus() }))
@@ -30,7 +33,10 @@ vi.mock("systeminformation", () => ({
     cpu: (): Promise<unknown> => siCpu(),
     memLayout: (): Promise<unknown> => siMemLayout(),
     graphics: (): Promise<unknown> => siGraphics(),
-    mem: (): Promise<unknown> => siMem()
+    mem: (): Promise<unknown> => siMem(),
+    cpuTemperature: (): Promise<unknown> => siTemp(),
+    cpuCurrentSpeed: (): Promise<unknown> => siSpeed(),
+    battery: (): Promise<unknown> => siBattery()
   }
 }))
 vi.mock("node:os", async () => {
@@ -40,14 +46,19 @@ vi.mock("node:os", async () => {
 
 const {
   HardwareSampler,
+  batteryOf,
+  clockOf,
   cpuLoad,
   cpuTimes,
   looksFakeGpu,
   looksNvidia,
   mergeGpus,
   namesMatch,
+  perCoreLoad,
+  perCoreTimes,
   sampleMemory,
-  swapOf
+  swapOf,
+  tempOf
 } = await import("./probe.js")
 
 /**
@@ -67,6 +78,15 @@ beforeEach(() => {
   siGraphics.mockResolvedValue({ controllers: [] })
   // 缺省不给交换空间：`swaptotal` 为 0 时按设计不出现 swap 字段，故多数用例无须理它
   siMem.mockResolvedValue({ swaptotal: 0, swapused: 0 })
+  /*
+   * 温度、频率、电池缺省都「取不到」
+   *
+   * 这三项在虚拟机与多数容器里本就读不到，故缺省即那种处境 —— 于是「读不到时整项
+   * 不出现」成为默认行为，不必每条用例各安排一遍。要验有数据那一路的用例自己覆盖。
+   */
+  siTemp.mockResolvedValue({ main: null, cores: [], max: null })
+  siSpeed.mockResolvedValue({ avg: 0 })
+  siBattery.mockResolvedValue({ hasBattery: false })
   // 缺省让累计量停着不动：多数用例并不关心 CPU，而停着的时钟正好让
   //「无差可作时不给 cpu 字段」成为默认行为，不必每条用例都去安排
   osCpus.mockReturnValue([core(1000, 1000)])
@@ -255,6 +275,37 @@ describe("sampleMemory", () => {
   it("总量是个正数", () => {
     expect(sampleMemory().total).toBeGreaterThan(0)
   })
+
+  /*
+   * 这一条是本次改动的理由
+   *
+   * 夹具照一台空闲 Linux 抄：16G 内存、`free` 只剩 1G（页面缓存占着 11G），而内核说
+   * available 有 12G。按 freemem 算是 94% 占用，按 available 算是 25% —— 后者才是
+   * `free -h` 与使用者的认知。
+   */
+  it("**有 si.mem() 时按 available 算可用**，不按 freemem 那个偏低的数", () => {
+    const total = 16 * 1024 ** 3
+    const mem = sampleMemory({ total, available: 12 * 1024 ** 3, buffcache: 11 * 1024 ** 3 })
+    expect(mem.total).toBe(total)
+    expect(mem.free).toBe(12 * 1024 ** 3)
+    expect(mem.used).toBe(4 * 1024 ** 3)
+    expect(mem.cached).toBe(11 * 1024 ** 3)
+  })
+
+  it("available 缺失时退回 os 的 freemem，仍给得出一份数", () => {
+    const mem = sampleMemory({ total: 0, available: Number.NaN })
+    expect(mem.total).toBeGreaterThan(0)
+    expect(mem.used + mem.free).toBe(mem.total)
+  })
+
+  it("**buffcache 为 0 也照给**（Windows 上确有此数），与「没有这一项」是两种画法", () => {
+    expect(sampleMemory({ total: 100, available: 40, buffcache: 0 }).cached).toBe(0)
+    expect(sampleMemory({ total: 100, available: 40 }).cached).toBeUndefined()
+  })
+
+  it("available 超过总量时夹到总量，不给出负的已用", () => {
+    expect(sampleMemory({ total: 100, available: 400 })).toMatchObject({ used: 0, free: 100 })
+  })
 })
 
 describe("swapOf", () => {
@@ -283,6 +334,152 @@ describe("swapOf", () => {
 
   it("已用超过总量时夹到总量，不给出负的可用量", () => {
     expect(swapOf({ swaptotal: 100, swapused: 500 })).toEqual({ total: 100, used: 100, free: 0 })
+  })
+})
+
+describe("perCoreTimes / perCoreLoad", () => {
+  it("逐核汇总，且各核之和等于整机那一份 —— 两处必然自洽", () => {
+    const list = [core(100, 50), core(200, 150)]
+    const per = perCoreTimes(list)
+    expect(per).toEqual([
+      { idle: 100, total: 150 },
+      { idle: 200, total: 350 }
+    ])
+    const whole = cpuTimes(list)
+    expect(per.reduce((sum, one) => sum + one.total, 0)).toBe(whole.total)
+    expect(per.reduce((sum, one) => sum + one.idle, 0)).toBe(whole.idle)
+  })
+
+  it("首次没有上一批时不给", () => {
+    expect(perCoreLoad(undefined, [{ idle: 0, total: 100 }])).toBeUndefined()
+  })
+
+  /*
+   * 这一条是 perCoreLoad 存在检查的理由
+   *
+   * 核数变了仍按下标配对，得到的是「3 号核的新值减 5 号核的旧值」—— 那种数看起来
+   * 完全正常，却毫无意义，而条形图照样画得出来。热插拔与改 cpuset 都会走到这里。
+   */
+  it("**核数变了就整批不给**，不按下标硬配", () => {
+    const prev = [{ idle: 0, total: 100 }, { idle: 0, total: 100 }]
+    const next = [{ idle: 50, total: 200 }]
+    expect(perCoreLoad(prev, next)).toBeUndefined()
+  })
+
+  it("逐核算出占用，半忙的核得 0.5", () => {
+    const prev = [{ idle: 100, total: 200 }]
+    const next = [{ idle: 150, total: 300 }]
+    expect(perCoreLoad(prev, next)).toEqual([0.5])
+  })
+
+  it("某一核算不出就整批不给 —— 一个缺口会让下标与核号错位", () => {
+    const prev = [{ idle: 0, total: 100 }, { idle: 0, total: 100 }]
+    // 第二核的累计量没有前进，`cpuLoad` 于是给 undefined
+    const next = [{ idle: 50, total: 200 }, { idle: 0, total: 100 }]
+    expect(perCoreLoad(prev, next)).toBeUndefined()
+  })
+})
+
+describe("tempOf", () => {
+  it("取主读数、各核与临界值", () => {
+    expect(tempOf({ main: 52, cores: [50, 54], max: 100 })).toEqual({
+      main: 52,
+      cores: [50, 54],
+      max: 100
+    })
+  })
+
+  /*
+   * 这两条是本函数存在的理由
+   *
+   * 台式机、虚拟机与多数容器里读不到传感器，而 `si` 在那时给的是 0 或 -1 而非抛错。
+   * 照收会让卡片上写「0 ℃」，那会被读成「凉得出奇」—— 一个真在运转的 CPU 不可能是 0 ℃，
+   * 故这条判断不会误伤真实读数。
+   */
+  it("**主读数为 0 时整项不出现**", () => {
+    expect(tempOf({ main: 0 })).toBeUndefined()
+  })
+
+  it("**主读数为 -1 时同样不出现**（部分平台的表示）", () => {
+    expect(tempOf({ main: -1 })).toBeUndefined()
+  })
+
+  it("取不到时不出现", () => {
+    expect(tempOf(undefined)).toBeUndefined()
+    expect(tempOf({ main: null })).toBeUndefined()
+  })
+
+  it("各核里混着读不到的那些，只留可用的", () => {
+    expect(tempOf({ main: 52, cores: [50, 0, -1, 54, null] })?.cores).toEqual([50, 54])
+  })
+
+  it("各核全都读不到时那一项不出现，主读数照常给", () => {
+    const out = tempOf({ main: 52, cores: [0, 0] })
+    expect(out).toEqual({ main: 52 })
+    expect(out?.cores).toBeUndefined()
+  })
+
+  it("临界值为 0 时不给 —— 分母为 0 的槽画不出来", () => {
+    expect(tempOf({ main: 52, max: 0 })?.max).toBeUndefined()
+  })
+})
+
+describe("clockOf", () => {
+  it("**GHz 换算成 MHz** —— 一张卡上两个频率不该各用一套单位", () => {
+    expect(clockOf({ avg: 3.4 })).toBe(3400)
+  })
+
+  it("取不到时不给，不记 0", () => {
+    expect(clockOf(undefined)).toBeUndefined()
+    expect(clockOf({ avg: 0 })).toBeUndefined()
+    expect(clockOf({ avg: null })).toBeUndefined()
+  })
+})
+
+describe("batteryOf", () => {
+  /*
+   * 这一条是本函数存在的理由
+   *
+   * `si.battery()` 在台式机上照样成功返回，只是 `hasBattery: false` 且各项为 0。
+   * 按「有没有拿到数据」判断会让每台服务器都多出一枚恒为「0%、未充电」的卡片。
+   */
+  it("**判据是 hasBattery，不是有没有拿到数据**", () => {
+    expect(batteryOf({ hasBattery: false, percent: 0, isCharging: false })).toBeUndefined()
+    expect(batteryOf(undefined)).toBeUndefined()
+  })
+
+  it("百分数换成 0-1 的比例", () => {
+    expect(batteryOf({ hasBattery: true, percent: 87, isCharging: false })?.level).toBeCloseTo(0.87, 10)
+  })
+
+  it("电量夹在 0-1：si 偶尔给 101，而超过满圈的环画不出来", () => {
+    expect(batteryOf({ hasBattery: true, percent: 101, isCharging: true })?.level).toBe(1)
+  })
+
+  it("放电中给出剩余分钟数", () => {
+    expect(batteryOf({ hasBattery: true, percent: 50, isCharging: false, timeRemaining: 96 })).toEqual({
+      level: 0.5,
+      charging: false,
+      minutesLeft: 96
+    })
+  })
+
+  /*
+   * 充电中那个数的语义是相反的
+   *
+   * `timeRemaining` 在充电时是「充满还要多久」，放电时是「还能用多久」。同一个字段
+   * 两种含义，照搬会让面板在充电时写「还剩 96 分钟」，而实情是「96 分钟后充满」。
+   */
+  it("**充电中不给 minutesLeft** —— 那个字段此时说的是「充满还要多久」", () => {
+    expect(batteryOf({ hasBattery: true, percent: 50, isCharging: true, timeRemaining: 96 })).toEqual({
+      level: 0.5,
+      charging: true
+    })
+  })
+
+  it("剩余时间取不到时那一项不出现", () => {
+    expect(batteryOf({ hasBattery: true, percent: 50, isCharging: false, timeRemaining: 0 })?.minutesLeft)
+      .toBeUndefined()
   })
 })
 
