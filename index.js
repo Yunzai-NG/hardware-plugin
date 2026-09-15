@@ -21,6 +21,7 @@
  *          **不能 import 裸包名。** 浏览器按 URL 解析模块说明符，`import si from "systeminformation"`
  *          在这里是一条网络错误。要用的能力一概经注入的 `api` 取；node 侧的依赖是那一半的事。
  */
+import hardwareTab from "./tabs/hardware-tab.js"
 import cpu from "./widgets/hardware-cpu.js"
 import disk from "./widgets/hardware-disk.js"
 import gpu from "./widgets/hardware-gpu.js"
@@ -33,3 +34,15 @@ import sysinfo from "./widgets/hardware-sysinfo.js"
 import system from "./widgets/hardware-system.js"
 
 export default [system, cpu, memory, swap, gpu, disk, net, processes, sysinfo, redis]
+
+/**
+ * 本包提供的页签，落在插件页上
+ *
+ * 与组件是两个导出：组件要 `page` 与 `defaultLayout`，页签不要，混在一处会让校验无从分辨
+ * 该按哪套规矩查。
+ *
+ * **页签存在的理由是那九枚 `defaultHidden` 的组件。** 它们默认不上板（装一个插件不该重排
+ * 别人的版面），于是想看整机状况的人得先进编辑模式、逐枚添加、再调格子 —— 而他要的只是
+ * 「让我看一眼这台机器」。页签把十枚一次铺开，不动概览页一格。
+ */
+export const tabs = [hardwareTab]

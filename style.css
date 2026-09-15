@@ -212,3 +212,62 @@
     flex-wrap: wrap;
   }
 }
+
+/* ─────────────── 「硬件」页签的版面 ─────────────── */
+
+/*
+ * 12 列栅格，列数与行高与概览页一致
+ *
+ * 各组件的 `defaultLayout.w` 是按 12 列量出来的（`w: 6` 意为半宽），页签这边若另取列数，
+ * 那些数字就全错位 —— 一枚声明 6 的组件在 4 列栅格里会溢出到下一行。
+ */
+.hw-tab {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--s4);
+}
+
+/*
+ * 每格自身是一个查询容器，否则组件里的 `@container` 一条都不生效
+ *
+ * 组件按「自己被拖到几列」调整内部版面（见 `.sys-grid` 那条 420px），而容器查询要求
+ * **被查询的祖先显式声明 `container-type`**。少了这一行，那些查询静默地永不命中：
+ * 窄列下两栏不会塌成一栏，表被挤扁而不报任何错。
+ *
+ * `inline-size` 而非 `size`：只按宽度查询。用 `size` 会让格子的高度也脱离常规流，
+ * 而这里的高度正是由 `heightOf()` 给死的。
+ */
+.hw-tab-cell {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+/*
+ * 卡片撑满格子
+ *
+ * 概览页由 GridBoard 给每格一个确定高度，卡片再 `height: 100%` 填满；这一页的高度由
+ * 行内 style 给出（`heightOf`），故同样要让卡片跟满 —— 不然一张内容少的卡（如未连上的
+ * Redis）会只占内容高度，与相邻的高卡片错开一截。
+ */
+.hw-tab-cell > .card {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+/*
+ * 窄屏收成单列
+ *
+ * 这一条用媒体查询而非容器查询：判据是窗口宽度（手机上打开面板），而非某一格占几列。
+ * 640px 以下 12 列栅格里的 `span 3` 只有几十像素宽，环与表都画不开。
+ */
+@media (width < 640px) {
+  .hw-tab {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 单列时列跨度作废，高度也交回内容 —— 一格独占整宽时无须再按格数算高 */
+  .hw-tab-cell {
+    grid-column: 1 / -1 !important;
+    height: auto !important;
+  }
+}
