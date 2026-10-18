@@ -35,6 +35,8 @@ CPU 与内存那两枚单环仍在包里，给「只想要一枚环、不要那�
 src/index.ts             node 侧：注册 GET /plugin/hardware/hardware 等端点
 src/probe.ts             型号探测（只探一次）与占用采样
 src/rings.ts             双色环与三段图例的几何，由 vitest 钉住
+src/procfs.ts            Linux 上直读 /proc 的进程表与网卡累计量
+src/throttle.ts          限频与并发合并：同一时刻的多次请求共用一次采样
 index.js                 面板侧入口：把十枚组件汇总成一个数组
 widgets/hardware-*.js    十枚组件，手写 ESM，不经构建
 widgets/lib/store.js     十枚共用的取数、画环与画表
@@ -64,6 +66,12 @@ style.css                本包自带的样式表，由 webuiPanel.style 声明
   故槽为空而非 0%。虚拟显示器（ToDesk、GameViewer 一类）按名字排掉
 - **型号**（CPU 型号、内存规格）只探一次：`si.cpu()` 2131ms、`si.graphics()` 2250ms、
   `si.memLayout()` 683ms，且均不缓存。首次请求**不等**它探完，型号在下一轮出现
+- **网络** Windows 上一次 PowerShell 读完全部网卡的累计量（si 每张网卡各起一个，约 6 倍慢），
+  Linux 直读 `/proc/net/dev`
+- **进程** Linux 直读 `/proc/<pid>/stat`，不经 `ps` 与逐进程的 `cat`；读不到时回落 si
+- **电池** 60 秒、**温度** 15 秒才重探一次，读不到的项 10 分钟内不再探 —— 这两项在 Windows 上
+  各要起一个 PowerShell，而它们几乎不变
+- 页面切到后台时不轮询；多个页签同时打开，同一端点 2 秒内共用一次采样
 
 ## 安装
 

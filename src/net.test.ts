@@ -8,7 +8,22 @@
  * 速率那两支与磁盘同理：真机上跑不出「累计量倒退」，而那恰是最需要钉住的一条。
  */
 import { describe, expect, it, vi } from "vitest"
-import { netRates, pickUsed, probeOne, toNetCounters } from "./net.js"
+import { netRates, parseWinStats, pickUsed, probeOne, toNetCounters } from "./net.js"
+
+describe("parseWinStats", () => {
+  it("一行一块网卡，中文名与回环照收，交给 toNetCounters 再筛", () => {
+    const out = parseWinStats("以太网\t1024\t2048\r\nLoopback Pseudo-Interface 1\t0\t0\r\n\r\n")
+    expect(out).toEqual([
+      { iface: "以太网", rx_bytes: 1024, tx_bytes: 2048 },
+      { iface: "Loopback Pseudo-Interface 1", rx_bytes: 0, tx_bytes: 0 }
+    ])
+    expect(toNetCounters(out, 1).map(item => item.iface)).toEqual(["以太网"])
+  })
+
+  it("数字读不出的行交给 toNetCounters 排掉，而不是记成 0", () => {
+    expect(toNetCounters(parseWinStats("坏行\tx\ty"), 1)).toEqual([])
+  })
+})
 
 describe("toNetCounters", () => {
   it("收下各网卡的累计量并记下采样时刻", () => {

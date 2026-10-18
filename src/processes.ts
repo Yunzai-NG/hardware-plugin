@@ -20,6 +20,7 @@
  */
 import { cpus } from "node:os"
 import si from "systeminformation"
+import type { ProcTable } from "./procfs.js"
 
 /**
  * 表里最多给几条
@@ -126,11 +127,22 @@ export function toProcesses(
 /**
  * 采一份进程概况
  * @param warn 出错时的告知方式
+ * @param proc Linux 上读 /proc 的进程表；缺省（及其他平台）走 si
  * @returns 进程概况；探不到时总数为 0、表为空
  */
 export async function sampleProcesses(
-  warn: (message: string, err: unknown) => void
+  warn: (message: string, err: unknown) => void,
+  proc?: ProcTable
 ): Promise<ProcessInfo> {
+  // Linux 上先直接读 /proc（见 procfs.ts 文件头）；读不了（安卓收紧 /proc 是常态）就静默退回 si
+  if (proc !== undefined) {
+    try {
+      const got = await proc.sample()
+      return toProcesses(got.list, got.all, cpus().length, process.pid)
+    } catch {
+      // 落到下面 si 那一路
+    }
+  }
   try {
     const all = await si.processes()
     return toProcesses(all.list ?? [], Number(all.all) || (all.list ?? []).length, cpus().length, process.pid)

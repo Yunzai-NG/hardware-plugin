@@ -24,6 +24,11 @@ import { HardwareSampler } from "./probe.js"
 import { sampleProcesses } from "./processes.js"
 import { DEFAULT_HOST, DEFAULT_PORT, sampleRedis } from "./redis.js"
 import { SysInfoSampler } from "./sysinfo.js"
+import { Throttled } from "./throttle.js"
+import { ProcTable } from "./procfs.js"
+
+/** 同一路采样在多少毫秒内的请求共用一次结果，见 `setup` 里节流那一段 */
+const SHARE_MS = 2000
 
 export {
   HardwareSampler,
@@ -72,7 +77,10 @@ export {
   toRedisInfo
 } from "./redis.js"
 export type { RedisInfo } from "./redis.js"
-export { NetSampler, netRates, pickUsed, probeOne, toNetCounters } from "./net.js"
+export { NetSampler, netRates, parseWinStats, pickUsed, probeOne, toNetCounters } from "./net.js"
+export { Throttled } from "./throttle.js"
+export { ProcTable, parseNetDev, parseProcStat, readNetDev } from "./procfs.js"
+export type { ProcRow, ProcStat } from "./procfs.js"
 export type { NetCounters, NetInfo, NetRates, ProbeResult, ProbeTarget } from "./net.js"
 
 /**
@@ -205,9 +213,20 @@ export default {
     const sysinfo = new SysInfoSampler()
     const net = new NetSampler()
 
+    /*
+     * 磁盘、进程、网卡三路加一层节流
+     *
+     * 几个标签页同开面板时，同一拍会到来几次请求：各起一套子进程是白费，带速率的两路还会因
+     * 两次采样只隔几毫秒而算出离谱的数。节流期取 2 秒，比 5 秒的节拍短得多，单页轮询每拍照旧是新数。
+     * 整机那一路自带 4 秒复用，系统信息自带长缓存，不再套。
+     */
+    const diskInfo = new Throttled(() => disks.sample(warn), SHARE_MS)
+    const proc = process.platform === "linux" ? new ProcTable() : undefined
+    const processInfo = new Throttled(() => sampleProcesses(warn, proc), SHARE_MS)
+
     ctx.route(HARDWARE_PATH, () => hardware.sample())
-    ctx.route(DISKS_PATH, () => disks.sample(warn))
-    ctx.route(PROCESSES_PATH, () => sampleProcesses(warn))
+    ctx.route(DISKS_PATH, () => diskInfo.get())
+    ctx.route(PROCESSES_PATH, () => processInfo.get())
     ctx.route(SYSINFO_PATH, () => sysinfo.sample(warn))
 
     /*
@@ -240,7 +259,8 @@ export default {
         ...(username === "" ? {} : { username })
       })
     })
-    ctx.route(NET_PATH, () => net.sample(warn, toProbeTargets(ctx.config<HardwareConfig>().probes)))
+    const netInfo = new Throttled(() => net.sample(warn, toProbeTargets(ctx.config<HardwareConfig>().probes)), SHARE_MS)
+    ctx.route(NET_PATH, () => netInfo.get())
 
     ctx.logger.debug("整机硬件、磁盘、进程、系统信息、Redis 与网络六个采样端点已注册")
   }

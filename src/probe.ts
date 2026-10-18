@@ -18,6 +18,7 @@
 import { cpus, freemem, totalmem } from "node:os"
 import { probeGpus } from "@yunzai-ng/core"
 import si from "systeminformation"
+import { Throttled } from "./throttle.js"
 
 /**
  * 快照缓存生存期
@@ -26,6 +27,17 @@ import si from "systeminformation"
  * 同为 5 秒，两个周期的相位差会让每隔几次出现一次「这次读的是上一次的数」。
  */
 const CACHE_MS = 4000
+
+/**
+ * 电池与温度的复用期：有时 / 探不到时
+ *
+ * 两者在 Windows 上各要起一个 PowerShell（本机实测 0.7 秒），而电量一分钟才动一两个百分点。
+ * 探不到（台式机没有电池、多数 Windows 读不到 CPU 温度）时拉到十分钟：那不会忽然变成探得到，
+ * 每拍去确认一次只是白起进程。仍不是永久缓存，免得接上电源适配器一类的变化永远看不见。
+ */
+const BATTERY_MS = 60_000
+const TEMP_MS = 15_000
+const ABSENT_MS = 600_000
 
 /**
  * 型号表里按名字排掉的东西
@@ -540,8 +552,14 @@ export class HardwareSampler {
   /** 型号探测是否正在进行，避免五秒一轮的请求各起一次 */
   #probing = false
 
-  /** 短命快照缓存 */
-  #cache: { at: number; value: HardwareInfo } | undefined
+  /** 整份快照：4 秒内复用，并发的请求共用一次采样 */
+  readonly #snapshot: Throttled<HardwareInfo>
+
+  /** 电池，见 `BATTERY_MS` */
+  readonly #battery: Throttled<BatteryInfo | undefined>
+
+  /** CPU 温度，见 `BATTERY_MS` */
+  readonly #temp: Throttled<TempInfo | undefined>
 
   /** 出错时的告知方式 */
   readonly #warn: ProbeWarn
@@ -551,6 +569,23 @@ export class HardwareSampler {
    */
   constructor(warn?: ProbeWarn) {
     this.#warn = warn ?? ((): void => {})
+    this.#snapshot = new Throttled(force => this.#take(force), CACHE_MS)
+    this.#battery = new Throttled(
+      () =>
+        si.battery().then(batteryOf, (err: unknown) => {
+          this.#warn("探测电池失败", err)
+          return undefined
+        }),
+      value => (value === undefined ? ABSENT_MS : BATTERY_MS)
+    )
+    this.#temp = new Throttled(
+      () =>
+        si.cpuTemperature().then(tempOf, (err: unknown) => {
+          this.#warn("探测 CPU 温度失败", err)
+          return undefined
+        }),
+      value => (value === undefined ? ABSENT_MS : TEMP_MS)
+    )
   }
 
   /**
@@ -621,12 +656,16 @@ export class HardwareSampler {
    * @param force 是否绕过缓存，仅测试用
    * @returns 整机快照
    */
-  async sample(force = false): Promise<HardwareInfo> {
-    const now = Date.now()
-    if (!force && this.#cache !== undefined && now - this.#cache.at < CACHE_MS) {
-      return this.#cache.value
-    }
+  sample(force = false): Promise<HardwareInfo> {
+    return this.#snapshot.get(force)
+  }
 
+  /**
+   * 实际采一份快照
+   * @param force 电池与温度是否也绕过复用
+   * @returns 整机快照
+   */
+  async #take(force: boolean): Promise<HardwareInfo> {
     if (this.#models === undefined && !this.#probing) {
       // 刻意不 await：这一趟要 2 秒以上，而面板正等着第一份数据
       void this.probeModels()
@@ -654,7 +693,7 @@ export class HardwareSampler {
      * （Linux 读 sysfs、Windows 走 WMI），与 `si.processes()` 那种要遍历整张进程表的
      * 调用不是一个量级，故不必另开端点。
      */
-    const [measured, mem, temp, speed, battery] = await Promise.all([
+    const [measured, mem, temperature, speed, power] = await Promise.all([
       probeGpus().catch((err: unknown) => {
         this.#warn("探测显卡占用失败", err)
         return undefined
@@ -663,24 +702,16 @@ export class HardwareSampler {
         this.#warn("探测内存与交换空间失败", err)
         return undefined
       }),
-      si.cpuTemperature().catch((err: unknown) => {
-        this.#warn("探测 CPU 温度失败", err)
-        return undefined
-      }),
+      this.#temp.get(force),
       si.cpuCurrentSpeed().catch((err: unknown) => {
         this.#warn("探测 CPU 频率失败", err)
         return undefined
       }),
-      si.battery().catch((err: unknown) => {
-        this.#warn("探测电池失败", err)
-        return undefined
-      })
+      this.#battery.get(force)
     ])
 
     const swap = swapOf(mem)
-    const temperature = tempOf(temp)
     const clock = clockOf(speed)
-    const power = batteryOf(battery)
 
     const value: HardwareInfo = {
       ...(load === undefined ? {} : { cpu: load }),
@@ -693,7 +724,6 @@ export class HardwareSampler {
       ...(clock === undefined ? {} : { clock }),
       ...(power === undefined ? {} : { battery: power })
     }
-    this.#cache = { at: now, value }
     return value
   }
 }

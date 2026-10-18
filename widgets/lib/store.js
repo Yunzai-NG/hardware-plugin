@@ -25,19 +25,47 @@ import { RING_RADIUS, RING_VIEWBOX, dualRing, ringLegend } from "../../dist/ring
  */
 const MIN_GAP_MS = 2000
 
-/** 各端点的共享状态，键为端点路径 */
+/** 各端点的共享状态，键为端点路径（本包的相对路径，或内核接口的绝对路径） */
 const stores = new Map()
+
+/**
+ * 页面是否在后台
+ *
+ * **后台不轮询。** 面板的节拍在标签页切走之后照走（浏览器只把它限到一秒一次以上），而每一拍
+ * 都要 node 侧真去探一遍硬件 —— Windows 上是几个 PowerShell。一个开着忘了关的标签页就让这台机器
+ * 一直替没人看的卡片干活。切回来时 `visibilitychange` 立刻补一拍，不必等下一个五秒。
+ * @returns {boolean} 是否在后台
+ */
+function hidden() {
+  return globalThis.document?.hidden === true
+}
+
+// 经 globalThis 取：本文件也在 node 里被用例 import，那里没有 document
+globalThis.document?.addEventListener("visibilitychange", () => {
+  if (hidden()) return
+  for (const store of stores.values()) {
+    if (store.users > 0) void refresh(store)
+  }
+})
 
 /**
  * 取（或建立）某个端点的共享状态
  * @param {object} api 注入的面板能力
- * @param {string} path 端点相对本包的路径
+ * @param {string} path 端点路径
+ * @param {(api: object, path: string) => Promise<unknown>} load 取数方式
  * @returns {object} 该端点的状态
  */
-function storeOf(api, path) {
+function storeOf(api, path, load) {
   let store = stores.get(path)
   if (store === undefined) {
-    store = { data: api.ref(undefined), error: api.ref(""), inflight: undefined, lastAt: 0 }
+    store = {
+      data: api.ref(undefined),
+      error: api.ref(""),
+      inflight: undefined,
+      lastAt: 0,
+      users: 0,
+      fetch: () => load(api, path)
+    }
     stores.set(path, store)
   }
   return store
@@ -45,18 +73,17 @@ function storeOf(api, path) {
 
 /**
  * 取一次数据并写入共享状态
- * @param {object} api 注入的面板能力
- * @param {string} path 端点相对本包的路径
- * @returns {Promise<void>|undefined} 取完即结束；被间隔挡下时不发请求
+ * @param {object} store 端点状态
+ * @returns {Promise<void>|undefined} 取完即结束；被间隔挡下或页面在后台时不发请求
  */
-function refresh(api, path) {
-  const store = storeOf(api, path)
+function refresh(store) {
   if (store.inflight !== undefined) return store.inflight
+  if (hidden()) return undefined
   if (Date.now() - store.lastAt < MIN_GAP_MS) return undefined
 
   store.lastAt = Date.now()
-  store.inflight = api
-    .own(path)
+  store.inflight = store
+    .fetch()
     .then(value => {
       store.data.value = value
       store.error.value = ""
@@ -82,12 +109,29 @@ function refresh(api, path) {
  * @returns {object} `{ data, error }` 两个 ref，同端点的各组件共用同一份
  */
 export function useEndpoint(api, path) {
-  const store = storeOf(api, path)
+  return subscribe(api, path, (own, at) => own.own(at))
+}
+
+/**
+ * 订阅一个端点：登记节拍、立即取一次、记下有几枚组件在用
+ *
+ * 计数只给 `visibilitychange` 用：切回前台时只补那些还有组件在看的端点。
+ * @param {object} api 注入的面板能力
+ * @param {string} path 端点路径
+ * @param {(api: object, path: string) => Promise<unknown>} load 取数方式
+ * @returns {object} `{ data, error }`
+ */
+function subscribe(api, path, load) {
+  const store = storeOf(api, path, load)
+  store.users += 1
+  api.onUnmounted(() => {
+    store.users -= 1
+  })
 
   api.onTick(() => {
-    void refresh(api, path)
+    void refresh(store)
   })
-  void refresh(api, path)
+  void refresh(store)
 
   return { data: store.data, error: store.error }
 }
@@ -113,42 +157,7 @@ export function useHardware(api) {
  * @returns {object} `{ data, error }`
  */
 export function useOverview(api) {
-  const path = "/api/overview"
-  let store = stores.get(path)
-  if (store === undefined) {
-    store = { data: api.ref(undefined), error: api.ref(""), inflight: undefined, lastAt: 0 }
-    stores.set(path, store)
-  }
-
-  /**
-   * 取一次概览
-   * @returns {Promise<void>|undefined} 取完即结束
-   */
-  const pull = () => {
-    if (store.inflight !== undefined) return store.inflight
-    if (Date.now() - store.lastAt < MIN_GAP_MS) return undefined
-    store.lastAt = Date.now()
-    store.inflight = api
-      .get(path)
-      .then(value => {
-        store.data.value = value
-        store.error.value = ""
-      })
-      .catch(err => {
-        store.error.value = err instanceof Error ? err.message : String(err)
-      })
-      .finally(() => {
-        store.inflight = undefined
-      })
-    return store.inflight
-  }
-
-  api.onTick(() => {
-    void pull()
-  })
-  void pull()
-
-  return { data: store.data, error: store.error }
+  return subscribe(api, "/api/overview", (own, at) => own.get(at))
 }
 
 /**

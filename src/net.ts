@@ -1,20 +1,71 @@
 /**
  * 模块职责：网络监控 —— 网卡的收发速率，以及对指定地址的可达性探测
- * 依赖方向：只依赖 `systeminformation` 与全局 `fetch`（node 18+ 内置）
+ * 依赖方向：只依赖 `systeminformation`、全局 `fetch`（node 18+ 内置）；Windows 上的累计量另起一个 PowerShell 读
  * 生命周期：速率需要两个采样点，故采样器持有上一个
  * 注意事项：四条约定 ——
  *          1) 默认不探测任何对外地址：出厂带默认目标等于让这台机器每 5 秒向第三方发一次请求，
  *             而使用者没要求过。目标一律由配置给出，空配置时组件显示「未配置」
- *          2) 网卡速率用 `si.networkStats()` 的累计量作差，不用它自带的 `rx_sec` / `tx_sec` ——
+ *          2) 网卡速率用累计量作差（Windows 见 `WIN_STATS_SCRIPT`），不用 `si.networkStats()` 自带的 `rx_sec` / `tx_sec` ——
  *             那是「距上次调用以来」的平均值，而谁调过取决于同进程里还有谁在用这个库
  *          3) 探测用 HEAD，且对方回 405 时**不退回 GET**：405 本身已是一次成功往返，证明「可达」
  *          4) 「连不上」与「连上了但状态码非 2xx」分开呈现，否则「我的服务挂了」与「我的网断了」
  *             在面板上是同一个红点
  */
+import { execFile } from "node:child_process"
 import si from "systeminformation"
+import { readNetDev } from "./procfs.js"
 
 /** 探测的超时 */
 const PROBE_TIMEOUT_MS = 4000
+
+/** Windows 上读网卡累计量的那一个 PowerShell 的超时 */
+const WIN_STATS_TIMEOUT_MS = 10_000
+
+/**
+ * Windows 上一次读出全部网卡累计量的命令
+ *
+ * `si.networkStats("*")` 在 Windows 上**每块网卡起一个** `Get-NetAdapterStatistics`（而那条命令本身就列出全部网卡），
+ * 七块网卡的机器上一拍是七个 PowerShell、3 秒多。这里用 .NET 的 `GetIPStatistics()` 一次读完（本机 0.6 秒），
+ * 也不必加载 NetAdapter 模块。输出先设成 UTF-8：网卡名常是「以太网」「本地连接* 3」这类中文。
+ */
+const WIN_STATS_SCRIPT =
+  "[Console]::OutputEncoding=[Text.Encoding]::UTF8;" +
+  "[System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()|%{$s=$_.GetIPStatistics();" +
+  "$_.Name+[char]9+$s.BytesReceived+[char]9+$s.BytesSent}"
+
+/**
+ * 解析 `WIN_STATS_SCRIPT` 的输出，形状对齐 `si.networkStats()` 的那几个字段
+ * @param stdout 每行「名字\t收\t发」
+ * @returns 供 `toNetCounters` 用的原始项
+ */
+export function parseWinStats(stdout: string): { iface: string; rx_bytes: number; tx_bytes: number }[] {
+  const out: { iface: string; rx_bytes: number; tx_bytes: number }[] = []
+  for (const line of stdout.split(/\r?\n/)) {
+    const [iface = "", rx = "", tx = ""] = line.split("\t")
+    if (iface.trim() === "") continue
+    out.push({ iface: iface.trim(), rx_bytes: Number(rx), tx_bytes: Number(tx) })
+  }
+  return out
+}
+
+/**
+ * 读各网卡的累计收发量
+ * @returns 与 `si.networkStats()` 同形的原始项
+ */
+async function readNetStats(): Promise<readonly { iface?: string; rx_bytes?: number; tx_bytes?: number }[]> {
+  // Linux 读 /proc/net/dev，一次读完、不起进程，见 procfs.ts 文件头；读不了（安卓收紧了 /proc）退回 si
+  if (process.platform === "linux") return readNetDev().catch(() => si.networkStats("*"))
+  if (process.platform !== "win32") return si.networkStats("*")
+  const stdout = await new Promise<string>((resolve, reject) => {
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", WIN_STATS_SCRIPT],
+      { timeout: WIN_STATS_TIMEOUT_MS, windowsHide: true, encoding: "utf8" },
+      (err, out) => (err ? reject(err) : resolve(out))
+    )
+  })
+  return parseWinStats(stdout)
+}
 
 /** 一块网卡的累计收发量 */
 export interface NetCounters {
@@ -208,9 +259,9 @@ export class NetSampler {
     warn: (message: string, err: unknown) => void,
     targets: readonly ProbeTarget[] = []
   ): Promise<NetInfo> {
-    let stats: Awaited<ReturnType<typeof si.networkStats>> | undefined
+    let stats: Awaited<ReturnType<typeof readNetStats>> | undefined
     try {
-      stats = await si.networkStats("*")
+      stats = await readNetStats()
     } catch (err) {
       warn("探测网卡流量失败", err)
     }
