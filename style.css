@@ -1,12 +1,98 @@
-/* 本包样式只作用于 data-panel 容器，颜色与间距沿用面板令牌。 */
+/*
+ * 本包样式只作用于 data-panel 容器，颜色与间距沿用面板令牌
+ *
+ * 强调色一律 `--accent` 一族，随外观页的颜色与深浅模式变；本文件不写字面色值。
+ */
 .hw-card {
   display: block;
   min-width: 0;
 }
 
-.hw-card > .hw-title {
-  margin: 0 0 var(--s3);
+/* 标题行：图标底、标题与一行小字、右端一枚控件 */
+.hw-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+  min-width: 0;
+}
+
+.hw-head-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hw-title {
+  margin: 0;
   font-size: var(--fs-h3);
+}
+
+.hw-subtitle {
+  margin: 2px 0 0;
+  font-size: var(--fs-label);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hw-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.hw-badge {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-ctl);
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+.hw-actions {
+  flex: none;
+}
+
+/* 文字按钮：「完整配置」 */
+.hw-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  min-height: 30px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    color var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease);
+}
+
+.hw-link .hw-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.hw-link:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.hw-link:focus-visible,
+.spec-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .hw-content {
@@ -123,10 +209,6 @@
   padding: var(--s2) 0;
 }
 
-.ring-fill.ring-own {
-  stroke: var(--accent);
-}
-
 .ring-legend {
   display: flex;
   align-items: center;
@@ -159,34 +241,317 @@
   border-radius: var(--r-pill);
 }
 
-.legend-own { background: var(--accent); }
+.legend-own { background: var(--accent-solid); }
 .legend-rest { background: var(--border-strong); }
 .legend-idle { background: var(--raise); border: 1px solid var(--border); }
 .legend-label { color: var(--muted); overflow-wrap: anywhere; }
 .legend-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
-.sys-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.85fr);
-  gap: var(--s6);
-  align-items: center;
-}
-
+/* 系统卡：两枚环并排，其下一排指标片 */
 .sys-rings {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--s4);
 }
 
-.sys-rings .ring-wrap {
-  width: 96px;
-  height: 96px;
+/* 描边而不铺底：环的底圈是 `--raise`，铺同色底会让底圈消失，未满的环看着像歪的 */
+.sys-rings .ring-legend {
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
 }
 
-@container (width < 560px) {
-  .sys-grid { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
-  .sys-rings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sys-rings .ring-wrap {
+  width: 92px;
+  height: 92px;
+}
+
+.ring-fill.ring-own {
+  stroke: var(--accent-solid);
+}
+
+/* 指标片：一行一枚药丸，排不下自动换行 */
+.hw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
+.hw-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 0 var(--s3) 0 var(--s2);
+  border-radius: var(--r-pill);
+  background: var(--raise);
+  font-size: var(--fs-label);
+}
+
+.hw-chip .hw-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+
+.hw-chip-label {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.hw-chip-value {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 窄格子：两枚环上下排、图例落到环下 */
+@container (width < 520px) {
   .sys-rings .ring-legend { flex-direction: column; align-items: stretch; }
   .sys-rings .gauge { align-items: center; }
+}
+
+@container (width < 300px) {
+  .sys-rings { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ─────────────── 负载趋势 ─────────────── */
+
+.hw-lanes {
+  display: grid;
+  gap: var(--s3);
+}
+
+.hw-lane {
+  padding: var(--s2) var(--s3) var(--s2);
+  border-radius: var(--r-ctl);
+  background: var(--raise);
+}
+
+.hw-lane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+}
+
+.hw-lane-label {
+  font-size: var(--fs-hint);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.hw-lane-now {
+  font-family: var(--font-mono);
+  font-size: var(--fs-h2);
+  font-variant-numeric: tabular-nums;
+}
+
+.hw-lane-foot {
+  margin: 2px 0 0;
+  font-size: var(--fs-label);
+  color: var(--muted);
+}
+
+.hw-spark {
+  display: block;
+  width: 100%;
+  height: 36px;
+  margin-top: var(--s1);
+  overflow: visible;
+}
+
+.hw-spark-grid {
+  stroke: var(--border);
+  stroke-dasharray: 3 4;
+  fill: none;
+}
+
+.hw-spark-area {
+  fill: var(--accent);
+  opacity: 0.16;
+}
+
+.hw-spark-line {
+  fill: none;
+  stroke: var(--accent-solid);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.hw-spark-dot {
+  fill: var(--accent-solid);
+  stroke: var(--panel);
+  stroke-width: 1.5;
+}
+
+/* 内存那条取同一色相的另一档，两条并列时分得开 */
+.lane-mem .hw-spark-area {
+  fill: color-mix(in srgb, var(--accent) 50%, var(--muted));
+}
+
+.lane-mem .hw-spark-line,
+.lane-mem .hw-spark-dot {
+  stroke: color-mix(in srgb, var(--accent-solid) 55%, var(--muted));
+}
+
+.lane-mem .hw-spark-dot {
+  fill: color-mix(in srgb, var(--accent-solid) 55%, var(--muted));
+  stroke: var(--panel);
+}
+
+/* ─────────────── 完整配置 ─────────────── */
+
+.spec-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--s3);
+}
+
+.spec-sec {
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  min-width: 0;
+}
+
+.spec-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+  font-size: var(--fs-h3);
+}
+
+.spec-title .hw-badge {
+  width: 26px;
+  height: 26px;
+}
+
+.spec-pairs {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--s1) var(--s3);
+  margin: 0;
+  font-size: var(--fs-hint);
+}
+
+.spec-pairs dt {
+  color: var(--muted);
+}
+
+.spec-pairs dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.spec-item {
+  margin-top: var(--s2);
+  padding-top: var(--s2);
+  border-top: 1px dashed var(--border);
+}
+
+.spec-item-title {
+  margin: 0 0 var(--s1);
+  font-size: var(--fs-hint);
+  font-weight: 700;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.spec-dialog {
+  width: min(980px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow-2xl);
+}
+
+.spec-dialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.spec-sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 48px);
+}
+
+.spec-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s4);
+  border-bottom: 1px solid var(--border);
+}
+
+.spec-head h2 {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--fs-h2);
+}
+
+.spec-close {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--r-ctl);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.spec-close:hover {
+  color: var(--text);
+  background: var(--raise);
+}
+
+/* 对话框里的清单可以长，滚动在这一层 —— 这是弹层，不是栅格里的格子 */
+.spec-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--s4);
+  overflow: auto;
+}
+
+.spec-foot {
+  margin: 0;
+  padding: var(--s2) var(--s4) var(--s3);
+  border-top: 1px solid var(--border);
+}
+
+/* 手机上铺满整屏 */
+@media (width < 640px) {
+  .spec-dialog {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+  }
+
+  .spec-sheet {
+    height: 100%;
+    max-height: 100dvh;
+  }
+
+  .spec-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (forced-colors: active) {

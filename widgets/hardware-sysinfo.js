@@ -22,8 +22,8 @@ export default {
   id: "hardware.sysinfo",
   page: "overview",
   title: "系统信息",
-  // 与「系统」一同默认上板：系统占左 8 列，这一枚补右侧 4 列
   defaultLayout: { w: 4, h: 4, minW: 3, minH: 1, resizable: true, fit: true },
+  defaultHidden: true,
 
   /**
    * 建立组件状态

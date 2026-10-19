@@ -16,6 +16,7 @@
  *          而那台机器其实好着 —— 上一次的数配一句「更新失败」更有用。
  */
 import { RING_RADIUS, RING_VIEWBOX, dualRing, ringLegend } from "../../dist/rings.js"
+import { TITLE_ICONS, icon } from "./icons.js"
 
 /**
  * 两次请求之间的最小间隔
@@ -87,6 +88,7 @@ function refresh(store) {
     .then(value => {
       store.data.value = value
       store.error.value = ""
+      store.onData?.(value)
     })
     .catch(err => {
       // 保留上一次的数，只记一句错，理由见文件头
@@ -143,6 +145,71 @@ function subscribe(api, path, load) {
  */
 export function useHardware(api) {
   return useEndpoint(api, "hardware")
+}
+
+/** 趋势留多少个点：5 秒一拍，60 个点约五分钟 */
+export const HISTORY_POINTS = 60
+
+/**
+ * 整机 CPU 与内存的近期走势
+ *
+ * **只在浏览器里记，打开页面时从零开始。** node 侧不留历史：那要么是一份常驻内存的环形缓冲，
+ * 要么是落盘，两者都是为了「刚打开就有一条线」付出的长期开销。记的时机是每次整机采样回来，
+ * 故与其余几枚共用同一次请求，不多发一次。
+ * @param {object} api 注入的面板能力
+ * @returns {object} `{ points, error }`；`points` 是 `{ at, cpu, memory }` 的数组，旧在前
+ */
+export function useHistory(api) {
+  const { error } = useHardware(api)
+  const store = stores.get("hardware")
+  if (store.history === undefined) {
+    store.history = api.ref([])
+    store.onData = value => {
+      const memory = value?.memory
+      const point = {
+        at: Date.now(),
+        cpu: typeof value?.cpu === "number" ? value.cpu : undefined,
+        memory: memory === undefined || !(memory.total > 0) ? undefined : memory.used / memory.total
+      }
+      store.history.value = [...store.history.value, point].slice(-HISTORY_POINTS)
+    }
+    // 订阅之前那次已经回来的数，补作第一点
+    if (store.data.value !== undefined) store.onData(store.data.value)
+  }
+  return { points: store.history, error }
+}
+
+/**
+ * 一条迷你走势图：面积加折线，末点一枚圆点
+ *
+ * 纵轴恒为 0–100%，不随数据缩放 —— 缩放之后 3% 的抖动会画满整个高度，读成「负载在剧烈起伏」。
+ * 颜色取强调色，随主题变；填充是同色的低不透明度，不用渐变（渐变要全局唯一的 id）。
+ * @param {object} api 注入的面板能力
+ * @param {Array<number|undefined>} values 0-1 的比例，旧在前；缺测为 undefined
+ * @param {string} cls 额外类名，用来分颜色
+ * @returns {object} vnode
+ */
+export function sparkline(api, values, cls = "") {
+  const W = 200
+  const H = 48
+  const n = Math.max(values.length, 2)
+  const pts = values
+    .map((v, i) => (v === undefined ? undefined : [(i / (n - 1)) * W, H - 2 - Math.min(1, Math.max(0, v)) * (H - 4)]))
+    .filter(p => p !== undefined)
+  const line = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ")
+  const last = pts.at(-1)
+  return api.h(
+    "svg",
+    { class: `hw-spark ${cls}`.trim(), viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", "aria-hidden": "true", focusable: "false" },
+    [
+      api.h("path", { class: "hw-spark-grid", d: `M0 ${H / 2} H${W}` }),
+      pts.length < 2
+        ? null
+        : api.h("path", { class: "hw-spark-area", d: `${line} L${pts.at(-1)[0].toFixed(1)} ${H} L${pts[0][0].toFixed(1)} ${H} Z` }),
+      pts.length < 2 ? null : api.h("path", { class: "hw-spark-line", d: line, "vector-effect": "non-scaling-stroke" }),
+      last === undefined ? null : api.h("circle", { class: "hw-spark-dot", cx: last[0], cy: last[1], r: 2.5 })
+    ]
+  )
 }
 
 /**
@@ -326,11 +393,20 @@ export function ringWithLegend(api, title, total, own, ownLabel) {
  * @param {string} title 标题
  * @param {object|object[]|string} body 内容
  * @param {string} note 底部小字
+ * @param {{ sub?: string, action?: object }} [extra] 标题下的一行小字、标题行右端的一枚控件
  * @returns {object} vnode
  */
-export function card(api, title, body, note) {
+export function card(api, title, body, note, extra = {}) {
+  const mark = TITLE_ICONS[title]
   return api.h("article", { class: "card hw-card" }, [
-    api.h("h2", { class: "hw-title" }, title),
+    api.h("header", { class: "hw-head" }, [
+      mark === undefined ? null : api.h("span", { class: "hw-badge" }, [icon(api, mark)]),
+      api.h("div", { class: "hw-head-text" }, [
+        api.h("h2", { class: "hw-title" }, title),
+        extra.sub === undefined ? null : api.h("p", { class: "hw-subtitle" }, extra.sub)
+      ]),
+      extra.action ?? null
+    ]),
     api.h("div", { class: "hw-content" }, [body]),
     note === "" ? null : api.h("p", { class: "sub hw-note" }, note)
   ])

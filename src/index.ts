@@ -23,6 +23,7 @@ import type { ProbeTarget } from "./net.js"
 import { HardwareSampler } from "./probe.js"
 import { sampleProcesses } from "./processes.js"
 import { DEFAULT_HOST, DEFAULT_PORT, sampleRedis } from "./redis.js"
+import { SpecsSampler } from "./specs.js"
 import { SysInfoSampler } from "./sysinfo.js"
 import { Throttled } from "./throttle.js"
 import { ProcTable } from "./procfs.js"
@@ -64,6 +65,8 @@ export type { DiskInfo, DiskIoCounters, DiskIoRates, DiskPartition } from "./dis
 export { sampleProcesses, toProcesses } from "./processes.js"
 export type { ProcessEntry, ProcessInfo } from "./processes.js"
 export { PLATFORM, SysInfoSampler, kernelOf, toAddresses } from "./sysinfo.js"
+export { SpecsSampler, sizeText, textOf, toSpecs } from "./specs.js"
+export type { SpecItem, SpecRow, SpecSection, Specs, SpecsRaw } from "./specs.js"
 export type { LocalAddress, SysInfo } from "./sysinfo.js"
 export {
   DEFAULT_HOST,
@@ -84,7 +87,7 @@ export type { ProcRow, ProcStat } from "./procfs.js"
 export type { NetCounters, NetInfo, NetRates, ProbeResult, ProbeTarget } from "./net.js"
 
 /**
- * 六条查询端点相对本包的路径
+ * 各查询端点相对本包的路径
  *
  * **一类采样一条路由，不并成一个大响应。** 合成一条看似省事（浏览器侧一次请求就够），
  * 代价是最慢的那一类决定全部：Redis 连不上要等一个 TCP 超时，`si.processes()` 在进程多的
@@ -110,6 +113,9 @@ export const REDIS_PATH = "redis"
 
 /** 网卡速率与对外探测 */
 export const NET_PATH = "net"
+
+/** 完整配置清单，打开时才探 */
+export const SPECS_PATH = "specs"
 
 /** webui 给面板插件包 node 侧的受限上下文，与 `panelserver.ts` 的 `PanelServerContext` 同形 */
 export interface HardwareContext {
@@ -211,6 +217,7 @@ export default {
     const hardware = new HardwareSampler(warn)
     const disks = new DiskSampler()
     const sysinfo = new SysInfoSampler()
+    const specs = new SpecsSampler()
     const net = new NetSampler()
 
     /*
@@ -228,6 +235,7 @@ export default {
     ctx.route(DISKS_PATH, () => diskInfo.get())
     ctx.route(PROCESSES_PATH, () => processInfo.get())
     ctx.route(SYSINFO_PATH, () => sysinfo.sample(warn))
+    ctx.route(SPECS_PATH, () => specs.sample(warn))
 
     /*
      * Redis 与网络探测按配置采样
@@ -262,6 +270,6 @@ export default {
     const netInfo = new Throttled(() => net.sample(warn, toProbeTargets(ctx.config<HardwareConfig>().probes)), SHARE_MS)
     ctx.route(NET_PATH, () => netInfo.get())
 
-    ctx.logger.debug("整机硬件、磁盘、进程、系统信息、Redis 与网络六个采样端点已注册")
+    ctx.logger.debug("整机硬件、磁盘、进程、系统信息、完整配置、Redis 与网络七个采样端点已注册")
   }
 }
