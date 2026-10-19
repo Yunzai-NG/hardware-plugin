@@ -11,10 +11,6 @@
  *          **命中率缺失与命中率为 0 是两件事。** node 侧在累计命中与未命中皆为 0 时不给这个字段
  *          （那台 Redis 还没被读过），此处相应地不显示那一行 —— 显示「命中率 0%」会被读成「缓存全都
  *          没命中」，意思正相反。
- *
- *          **默认 h=4 是量出来的。** 连上时七行表共 266px，加标题、小字与内边距实测 317px；h=3 只给
- *          270px，于是默认布局自带一条滚动条。**默认布局不该需要滚动** —— 滚动是「使用者把格子缩小了」
- *          的退路，不是出厂状态。连不上时这一格显得空，但那是异常态，不该由它决定常态的尺寸。
  */
 import { card, empty, kv, useEndpoint } from "./lib/store.js"
 
@@ -22,7 +18,7 @@ export default {
   id: "hardware.redis",
   page: "overview",
   title: "Redis",
-  defaultLayout: { w: 3, h: 4, minW: 2, minH: 2, resizable: true },
+  defaultLayout: { w: 4, h: 3, minW: 3, minH: 1, resizable: true, fit: true },
   defaultHidden: true,
 
   /**

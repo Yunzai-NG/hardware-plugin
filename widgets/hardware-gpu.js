@@ -19,7 +19,7 @@ export default {
   id: "hardware.gpu",
   page: "overview",
   title: "显卡",
-  defaultLayout: { w: 4, h: 3, minW: 2, minH: 2, resizable: true },
+  defaultLayout: { w: 4, h: 2, minW: 3, minH: 1, resizable: true, fit: true },
   defaultHidden: true,
 
   /**

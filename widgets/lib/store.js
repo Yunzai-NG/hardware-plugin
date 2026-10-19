@@ -180,7 +180,7 @@ export function bar(api, label, ratio, text) {
   const level = api.fmt.gaugeLevel(ratio)
   const now = ratio === undefined ? undefined : Math.round(ratio * 100)
 
-  return api.h("div", { class: "bar" }, [
+  return api.h("div", { class: "hw-bar" }, [
     api.h("div", { class: "bar-head" }, [
       api.h("span", { class: "bar-label mono" }, label),
       api.h("span", { class: `bar-value ${level}` }, text)
@@ -329,43 +329,31 @@ export function ringWithLegend(api, title, total, own, ownLabel) {
  * @returns {object} vnode
  */
 export function card(api, title, body, note) {
-  return api.h("div", { class: "card fill" }, [
-    api.h("h2", { style: "margin-top: 0" }, title),
-    body,
-    api.h("p", { class: "sub", style: "margin-bottom: 0" }, note)
+  return api.h("article", { class: "card hw-card" }, [
+    api.h("h2", { class: "hw-title" }, title),
+    api.h("div", { class: "hw-content" }, [body]),
+    note === "" ? null : api.h("p", { class: "sub hw-note" }, note)
   ])
 }
 
 /**
- * 一枚只装一枚环的卡片
- *
- * 与 `card` 分开：环那一格不带标题（标题在环下），故用的是 `gauge-card` 而非
- * `card fill` —— 那个类在面板样式表里负责把内容整体居中（见 styles.css 的注释）。
+ * 单环卡片，大小归本包样式，不依赖格子高度。
  * @param {object} api 注入的面板能力
  * @param {object} body 环
  * @returns {object} vnode
  */
 export function gaugeCard(api, body) {
-  return api.h("div", { class: "card gauge-card" }, [body])
+  return api.h("article", { class: "card hw-card hw-gauge-card" }, [body])
 }
 
 /**
- * 一张两列的键值表，用于系统信息与 Redis 那类「一行一个事实」的组件
- *
- * **类名是 `pairs`，不是 `kv`。** 初版写 `<dl class="kv">` —— 而 `kv` 在面板样式表里
- * 是键值对**编辑器**的类名（`.kv` 是纵向 flex，`.kv-row` 是带 input 的三列栅格），
- * 并非一张两列清单。后果是 `dt` / `dd` 各占一整行、逐个纵向堆叠：系统信息那 12 行
- * 撑到 1026px 塞进 270px 的格子，溢出 660px。这个错**不报任何错**，只表现为
- * 「这一格怎么这么长」。
- *
- * 真正的两列清单是运行时表用的 `table.pairs`（`th` 取自身宽度且不折行，`td` 长内容
- * 处断行）。故此处照它的形态给 —— 一张 table，而不是 dl。
+ * 两列表格；类名归本包，避免面板通用布局规则改写 table 的 display。
  * @param {object} api 注入的面板能力
  * @param {Array<[string, string]>} rows 每行的名与值
  * @returns {object} vnode
  */
 export function kv(api, rows) {
-  return api.h("table", { class: "pairs" }, [
+  return api.h("table", { class: "hw-pairs" }, [
     api.h(
       "tbody",
       null,
@@ -386,7 +374,7 @@ export function kv(api, rows) {
  * @returns {object} vnode
  */
 export function empty(api, text) {
-  return api.h("p", { class: "sub", style: "margin: auto 0; text-align: center" }, text)
+  return api.h("p", { class: "sub hw-empty" }, text)
 }
 
 /**

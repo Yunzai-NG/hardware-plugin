@@ -1,101 +1,132 @@
-/*
- * 本包自带的样式表，由 package.json 的 `webuiPanel.style` 指出
- *
- * **每条选择器都会被面板限定到本包之后才注入**：下面的 `.legend-dot` 实际生效的是
- * `[data-panel="panels/hardware"] .legend-dot`。故类名不必加前缀，也改不到本包以外的东西。
- *
- * **颜色一律取面板的令牌**，不写字面色值：写死的色值在另一套主题下会看不见。间距取
- * `--s1`…`--s8`，圆角取三档 —— 与面板自身同一套刻度，两者并排时才不差半个像素。
- *
- * 本文件补的是面板样式表里没有的那几样：
- *   - `.ring-own`：双色环上本进程那一段的颜色。**面板样式表里没有这个类** —— `.ring-fill`
- *     给了灰色兜底，故那一段此前与外圈同色，「双色环」实际是单色的。
- *   - `.legend-*`：环旁三段图例。
- *   - `.sys-*`：「系统」那一枚的左右两栏布局。
- */
+/* 本包样式只作用于 data-panel 容器，颜色与间距沿用面板令牌。 */
+.hw-card {
+  display: block;
+  min-width: 0;
+}
 
-/* ─────────────── 双色环缺的那一段颜色 ─────────────── */
+.hw-card > .hw-title {
+  margin: 0 0 var(--s3);
+  font-size: var(--fs-h3);
+}
 
-/*
- * 本进程那一段用强调色
- *
- * 与外圈（`.ring-fill` 的 `--border-strong`，或占用高时的 `--warn` / `--err`）拉开色相，
- * 否则两段首尾相接处看不出分界 —— 而那条分界正是「其中多少是机器人」的唯一可见凭据。
- *
- * 写在 `.ring-fill` 之后并同样带一层类，特指度才压得住它；`.ring-fill.warn` 那两条
- * 是同级的两类选择器，故本条须在注入顺序上靠后 —— 包的样式表是运行时追加到 `<head>` 的，
- * 天然在面板样式表之后。
- */
+.hw-content {
+  min-width: 0;
+}
+
+.hw-card > .hw-note {
+  margin: var(--s3) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.hw-empty {
+  margin: var(--s4) 0;
+  text-align: center;
+}
+
+/* 表保持 table 布局，不能被 .card.fill 的 flex 规则改成纵排。 */
+.hw-pairs,
+.hw-processes {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--fs-hint);
+}
+
+.hw-pairs th,
+.hw-pairs td,
+.hw-processes th,
+.hw-processes td {
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.hw-pairs th {
+  width: 32%;
+  padding-right: var(--s3);
+  color: var(--muted);
+  background: none;
+  text-align: left;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.hw-pairs td {
+  padding-left: var(--s2);
+}
+
+.hw-pairs tr:last-child > *,
+.hw-processes tbody tr:last-child > * {
+  border-bottom: none;
+}
+
+.hw-processes th {
+  color: var(--muted);
+  background: none;
+  font-weight: 400;
+  text-align: left;
+}
+
+.hw-processes th:nth-child(2),
+.hw-processes td:nth-child(2) {
+  width: 18%;
+  text-align: right;
+}
+
+.hw-processes th:nth-child(3),
+.hw-processes td:nth-child(3) {
+  width: 27%;
+  text-align: right;
+}
+
+.hw-processes td:first-child {
+  padding-right: var(--s3);
+}
+
+.hw-process-name {
+  display: block;
+}
+
+.hw-own-label {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-label);
+}
+
+.hw-bar .bar-head {
+  flex-wrap: wrap;
+  row-gap: var(--s1);
+}
+
+.hw-bar .bar-label {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.hw-bar .bar-value {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* 环尺寸与格子高度解耦，自动高度测量不会反复放大自身。 */
+.hw-card .ring-wrap {
+  width: 112px;
+  height: 112px;
+  flex: none;
+}
+
+.hw-gauge-card > .gauge {
+  gap: var(--s2);
+  padding: var(--s2) 0;
+}
+
 .ring-fill.ring-own {
   stroke: var(--accent);
 }
 
-/* ─────────────── 环旁的三段图例 ─────────────── */
-
-.legend {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s1);
-  min-width: 0;
-}
-
-.legend-row {
-  display: flex;
-  align-items: center;
-  gap: var(--s2);
-  font-size: var(--fs-hint);
-}
-
-/*
- * 每行前的圆点
- *
- * `flex: 0 0 auto` 是必需的：默认可收缩，而窄格子里被压扁的圆点会变成一小段竖线。
- */
-.legend-dot {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  border-radius: var(--r-pill);
-}
-
-/* 三段的颜色与环上一一对应，故图例无须另立一套约定 */
-.legend-own {
-  background: var(--accent);
-}
-
-.legend-rest {
-  background: var(--border-strong);
-}
-
-/* 空闲那一段即环底那圈，取同一个令牌 */
-.legend-idle {
-  background: var(--raise);
-  /* 面色与卡片底色接近，补一道描边免得这一枚圆点看起来是缺的 */
-  border: 1px solid var(--border);
-}
-
-.legend-label {
-  color: var(--muted);
-  /* 名字长时先让它省略，把百分数留住 —— 那才是这一行的正文 */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/*
- * 百分数靠右
- *
- * `margin-left: auto` 把它推到行尾，三行的数字因此对齐成一列。等宽数字免得刷新时
- * 每行的宽度各自变化。
- */
-.legend-num {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-/* 环与它的图例：环在左，图例在右 */
 .ring-legend {
   display: flex;
   align-items: center;
@@ -103,171 +134,64 @@
   min-width: 0;
 }
 
-/*
- * 环那一侧按内容取宽，图例吃掉余下的
- *
- * 面板的 `.gauge` 带 `flex: 1 1 auto`（在 `.gauge-card` 里它要占满整格），而这里它是
- * 横向 flex 的一项 —— 那条声明会让环这一侧伸展去分掉一半宽度，于是三行图例被挤到
- * 换行。环的宽度由 `.ring-wrap` 的 `aspect-ratio` 算定，本就不需要额外空间。
- *
- * 图例反过来要 `flex: 1 1 auto`：`.legend-num` 靠 `margin-left: auto` 靠右，那要求
- * 这一栏有确定宽度可推 —— 按内容取宽时三行的数字各自贴着自己那行的文字，不成一列。
- */
 .ring-legend > .gauge {
-  flex: 0 0 auto;
+  flex: none;
 }
 
-.ring-legend > .legend {
-  flex: 1 1 auto;
-}
-
-/* ─────────────── 「系统」那一枚的两栏 ─────────────── */
-
-/*
- * 外层只做包裹，栅格在内层 —— 这一层的属性拗不过面板
- *
- * `.sys-body` 是 `.card.fill` 的直接子元素，故面板样式表里那条
- * `.board .card.fill > :not(h2, .sub:last-child)` 管着它：`display: flex`、
- * 纵排、`justify-content: safe center`、`overflow: auto`，特指度 0,5,0。
- * 本包的选择器被限定后是 `[data-panel="panels/hardware"] .sys-body`，只有 0,2,0 ——
- * 在这一层写 `display: grid` 会被静默改回 flex，两栏塌成一列而不报任何错。
- *
- * 故这一层顺着面板走（只补一条「别让内容缩没」），栅格落在下一层。
- */
-.sys-body {
-  width: 100%;
+.legend {
+  flex: 1;
+  display: grid;
+  gap: var(--s1);
   min-width: 0;
 }
 
-/*
- * 左侧事实表，右侧两枚环
- *
- * 事实表那一栏可收缩（`minmax(0, 1fr)`），环那一栏按内容取宽 —— 反过来写会让环在
- * 窄格子里先被压扁，而椭圆的环比一张挤一点的表难读得多。
- */
+.legend-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--fs-hint);
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+}
+
+.legend-own { background: var(--accent); }
+.legend-rest { background: var(--border-strong); }
+.legend-idle { background: var(--raise); border: 1px solid var(--border); }
+.legend-label { color: var(--muted); overflow-wrap: anywhere; }
+.legend-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
 .sys-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--s4);
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.85fr);
+  gap: var(--s6);
   align-items: center;
-  min-width: 0;
 }
 
-/*
- * 事实表撑满它那一栏
- *
- * `kv()` 给出的是一张 `<table>`，而表格的默认宽度按内容算 —— 长型号（「AMD Ryzen 7
- * 6800H with Radeon Graphics」）会把这一栏顶宽，把环那一栏挤扁。给死 `width: 100%`
- * 之后表格服从栅格给的列宽，长值在 `td` 内断行（面板的 `.pairs` 已备好那一手）。
- */
-.sys-grid > .pairs {
-  width: 100%;
-}
-
-/*
- * 两枚环上下叠，与参考图一致
- *
- * 不并排：并排时两枚环各自的图例要挤在环的右侧，一格里于是有四列，而这一枚默认只占
- * 六列宽。
- */
 .sys-rings {
-  display: flex;
-  flex-direction: column;
-  gap: var(--s3);
-}
-
-/*
- * 这两枚环要一个**确定的**高度，否则它们塌成零
- *
- * 面板的 `.ring-wrap` 以高度为主动尺寸（`height: 100%` + `aspect-ratio: 1`），宽度跟着
- * 算出来 —— 那一套成立的前提是父级有确定高度，而在 `.gauge-card` 里确实有（那一格的
- * 内容项拿到 `flex: 1 1 auto`，高度由格子给）。
- *
- * 这里没有：`.sys-rings` 是按内容取高的 flex 列，故 `height: 100%` 解析成 auto，而 svg
- * 自身又是 `height: 100%` —— 两边都在等对方给数，环于是一个像素都不画。这个错**不报错**，
- * 表现是「图例出来了，环没有」，看起来像数据没到。
- *
- * 故按 `.ring-wrap` 那条上限（132px）取一个略小的定值：一格里有两枚环，各让一点。
- * 特指度 0,3,0 压得住面板那条 0,1,0。
- */
-.sys-rings .ring-wrap {
-  height: 104px;
-  max-height: 104px;
-}
-
-/*
- * 窄格子：环落到事实表之下
- *
- * 容器查询而非媒体查询 —— 这一格能有多窄取决于它在栅格里占几列，与窗口宽度无关。
- * 使用者把它从六列拖到四列时，窗口仍是 1600px。
- */
-@container (width < 420px) {
-  .sys-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  /* 一栏时两枚环改并排，免得整格被拉得过高 */
-  .sys-rings {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-}
-
-/* ─────────────── 「硬件」页签的版面 ─────────────── */
-
-/*
- * 12 列栅格，列数与行高与概览页一致
- *
- * 各组件的 `defaultLayout.w` 是按 12 列量出来的（`w: 6` 意为半宽），页签这边若另取列数，
- * 那些数字就全错位 —— 一枚声明 6 的组件在 4 列栅格里会溢出到下一行。
- */
-.hw-tab {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--s4);
 }
 
-/*
- * 每格自身是一个查询容器，否则组件里的 `@container` 一条都不生效
- *
- * 组件按「自己被拖到几列」调整内部版面（见 `.sys-grid` 那条 420px），而容器查询要求
- * **被查询的祖先显式声明 `container-type`**。少了这一行，那些查询静默地永不命中：
- * 窄列下两栏不会塌成一栏，表被挤扁而不报任何错。
- *
- * `inline-size` 而非 `size`：只按宽度查询。用 `size` 会让格子的高度也脱离常规流，
- * 而这里的高度正是由 `heightOf()` 给死的。
- */
-.hw-tab-cell {
-  container-type: inline-size;
-  min-width: 0;
+.sys-rings .ring-wrap {
+  width: 96px;
+  height: 96px;
 }
 
-/*
- * 卡片撑满格子
- *
- * 概览页由 GridBoard 给每格一个确定高度，卡片再 `height: 100%` 填满；这一页的高度由
- * 行内 style 给出（`heightOf`），故同样要让卡片跟满 —— 不然一张内容少的卡（如未连上的
- * Redis）会只占内容高度，与相邻的高卡片错开一截。
- */
-.hw-tab-cell > .card {
-  height: 100%;
-  box-sizing: border-box;
+@container (width < 560px) {
+  .sys-grid { grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
+  .sys-rings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sys-rings .ring-legend { flex-direction: column; align-items: stretch; }
+  .sys-rings .gauge { align-items: center; }
 }
 
-/*
- * 窄屏收成单列
- *
- * 这一条用媒体查询而非容器查询：判据是窗口宽度（手机上打开面板），而非某一格占几列。
- * 640px 以下 12 列栅格里的 `span 3` 只有几十像素宽，环与表都画不开。
- */
-@media (width < 640px) {
-  .hw-tab {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  /* 单列时列跨度作废，高度也交回内容 —— 一格独占整宽时无须再按格数算高 */
-  .hw-tab-cell {
-    grid-column: 1 / -1 !important;
-    height: auto !important;
-  }
+@media (forced-colors: active) {
+  .legend-dot { border: 1px solid CanvasText; }
+  .legend-own { background: Highlight; }
+  .legend-rest { background: CanvasText; }
+  .legend-idle { background: Canvas; }
 }

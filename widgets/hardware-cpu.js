@@ -23,7 +23,7 @@ export default {
   id: "hardware.cpu",
   page: "overview",
   title: "CPU",
-  defaultLayout: { w: 3, h: 3, minW: 2, minH: 3, resizable: true },
+  defaultLayout: { w: 4, h: 3, minW: 3, minH: 1, resizable: true, fit: true },
   defaultHidden: true,
 
   /**

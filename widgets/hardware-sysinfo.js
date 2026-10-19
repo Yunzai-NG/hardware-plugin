@@ -18,30 +18,12 @@ import { card, empty, kv, useEndpoint } from "./lib/store.js"
 /** 地址列几行，余下的合成一行计数 */
 const ADDRESS_ROWS = 2
 
-/*
- * 默认 h=6，由实测定出而非估算
- *
- * 本机实测（1600px 宽、4 列）：10 行，其中「系统」那行因发行版名字长而折成 60px，
- * 其余各 38px，表共 402px，内容盒要 405px。卡片里除内容之外的壳子固定占 87px
- * （标题 24px + 其下 8px + 小字 21px + 上下内边距各 16px），故卡片至少要 492px。
- * 行高 80px、间隙 16px，h=5 只有 464px（内容盒 377px，差 28px），只能上到 h=6
- * 的 560px。**默认布局不该需要滚动**，同一条原则。
- *
- * 折行那一行是关键，两版都在这里失手：按「10 行 × 38px」估得 380px，看似落在
- * h=4 之内 —— 而发行版全名（「Microsoft Windows 11 家庭版 中文版 10.0.26200」）
- * 在 4 列宽里必然折行，估算漏掉的就是这一行的第二行。h=4 差 87px 是这么来的。
- *
- * 上一版写 h=5 也仍差 28px，因为「表 287px」那个数是错的：把它与逐行量出的
- * 「9×38 + 60 = 402px」对一下即可 —— 前者比后者少了三行有余，估算冒充了实测。
- * 这一处不靠肉眼看图发现，`temp/diag-cardnote.mjs` 量的是内容盒的
- * `scrollHeight > clientHeight`。
- */
 export default {
   id: "hardware.sysinfo",
   page: "overview",
   title: "系统信息",
-  defaultLayout: { w: 4, h: 6, minW: 3, minH: 3, resizable: true },
-  defaultHidden: true,
+  // 与「系统」一同默认上板：系统占左 8 列，这一枚补右侧 4 列
+  defaultLayout: { w: 4, h: 4, minW: 3, minH: 1, resizable: true, fit: true },
 
   /**
    * 建立组件状态

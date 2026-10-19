@@ -127,6 +127,11 @@ describe("toProcesses", () => {
 })
 
 describe("sampleProcesses", () => {
+  it("si 的 KiB 转成字节，/proc 的字节不重复放大", async () => {
+    siProcesses.mockResolvedValue({ all: 1, list: [{ pid: 7, name: "node", memRss: 80 * 1024 }] })
+    expect((await sampleProcesses(() => {})).top[0]?.memory).toBe(80 * 1024 * 1024)
+    expect(toProcesses([{ pid: 7, memRss: 80 * 1024 * 1024 }], 1, 1, 999).top[0]?.memory).toBe(80 * 1024 * 1024)
+  })
   it("探不到时给「总数 0、表为空」并记一句，不抛错", async () => {
     siProcesses.mockRejectedValue(new Error("permission denied"))
     const warn = vi.fn()

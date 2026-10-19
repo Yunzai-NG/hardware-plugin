@@ -18,7 +18,7 @@ export default {
   id: "hardware.swap",
   page: "overview",
   title: "交换空间",
-  defaultLayout: { w: 3, h: 2, minW: 2, minH: 2, resizable: true },
+  defaultLayout: { w: 4, h: 2, minW: 3, minH: 1, resizable: true, fit: true },
   defaultHidden: true,
 
   /**

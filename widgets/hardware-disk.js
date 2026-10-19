@@ -19,7 +19,7 @@ export default {
   id: "hardware.disk",
   page: "overview",
   title: "磁盘与读写",
-  defaultLayout: { w: 6, h: 3, minW: 3, minH: 3, resizable: true },
+  defaultLayout: { w: 8, h: 3, minW: 4, minH: 1, resizable: true, fit: true },
   defaultHidden: true,
 
   /**

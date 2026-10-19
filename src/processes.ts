@@ -22,18 +22,7 @@ import { cpus } from "node:os"
 import si from "systeminformation"
 import type { ProcTable } from "./procfs.js"
 
-/**
- * 表里最多给几条
- *
- * **8 条是按卡片装得下多少行定的，不是随手取的整数。** 实测一行连内边距约 37px
- * （带「本机器人」药丸的那一行更高），加卡片标题与底部小字约 82px；默认 h=5 给
- * 464px（5 × 80 行高 + 4 × 16 间隙），故装得下 9 行 —— 8 条加上必然补进来的本进程
- * 那一条，恰好是 9。
- *
- * 初版取 12，于是默认尺寸下溢出 102px、卡片自带一条滚动条。**默认布局不该需要滚动**
- * （同一条原则）：滚动是「使用者把格子缩小了」的退路，不是出厂状态。
- * 要看更多的人把格子拉高即可 —— 这一格声明了 `resizable`。
- */
+/** 只传前八名，另补本进程；卡片高度随实际行数变化。 */
 export const TOP_N = 8
 
 /** 一个进程 */
@@ -67,6 +56,7 @@ export interface ProcessInfo {
  * @param total 进程总数
  * @param cores 逻辑核数，用于把 `pcpu` 换算成占整机的比例
  * @param selfPid 本进程号
+ * @param rssScale memRss 到字节的倍率；直接读 /proc 为 1，systeminformation 为 1024
  * @returns 进程概况
  */
 export function toProcesses(
@@ -78,7 +68,8 @@ export function toProcesses(
   }[],
   total: number,
   cores: number,
-  selfPid: number
+  selfPid: number,
+  rssScale = 1
 ): ProcessInfo {
   const divisor = Number.isFinite(cores) && cores > 0 ? cores : 1
   const rows: ProcessEntry[] = []
@@ -90,9 +81,7 @@ export function toProcesses(
     // `pcpu` 是占单核的百分比，故除以 100 再除以核数，见文件头
     const cpu = Number.isFinite(pcpu) && pcpu > 0 ? Math.min(1, pcpu / 100 / divisor) : 0
 
-    // `memRss` 的单位在各平台上不一致：Windows 上是字节，Linux 上是 KB。
-    // 库自己在 Linux 那一路乘了 1024，故此处照原样取，不再二次换算
-    const rss = Number(item.memRss)
+    const rss = Number(item.memRss) * rssScale
 
     rows.push({
       pid,
@@ -145,7 +134,8 @@ export async function sampleProcesses(
   }
   try {
     const all = await si.processes()
-    return toProcesses(all.list ?? [], Number(all.all) || (all.list ?? []).length, cpus().length, process.pid)
+    // si 的 memRss 在 Windows、Linux 与 macOS 上均为 KiB；/proc 分支已是字节。
+    return toProcesses(all.list ?? [], Number(all.all) || (all.list ?? []).length, cpus().length, process.pid, 1024)
   } catch (err) {
     warn("探测进程表失败", err)
     return { total: 0, top: [] }
