@@ -474,11 +474,13 @@
   border-radius: var(--r-card);
   background: var(--panel);
   color: var(--text);
-  box-shadow: var(--shadow-2xl);
+  /* 浮起之物：取面板的那一档投影；webui 0.7.0 之前没有 --shadow-float，退回 --shadow-2xl */
+  box-shadow: var(--shadow-float, var(--shadow-2xl));
 }
 
+/* 遮罩取面板的令牌，主题换了遮罩深浅时一并跟着 */
 .spec-dialog::backdrop {
-  background: rgb(0 0 0 / 45%);
+  background: var(--scrim);
 }
 
 .spec-sheet {

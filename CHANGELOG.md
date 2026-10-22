@@ -2,6 +2,12 @@
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## 0.4.1 — 2026-10-22
+
+### 变更
+
+- 配置详情弹窗的遮罩与投影改取面板令牌（`--scrim`、`--shadow-float`），跟着 webui 0.7.0 的主题走；去掉写死的半透明黑。
+
 ## 0.4.0 — 2026-10-19
 
 ### 新增
